@@ -10,8 +10,8 @@ fn suite() {
 
     println!("BUILDING sbd-server-test-suite IN RELEASE MODE");
     let suite = escargot::CargoBuild::new()
-        .bin("sbd-server-test-suite-bin")
-        .manifest_path("../sbd-server-test-suite/Cargo.toml")
+        .bin("sbd-o-bahn-server-tester-bin")
+        .manifest_path("../sbd-o-bahn-server-tester/Cargo.toml")
         .release()
         .current_target()
         .run()

@@ -2,8 +2,11 @@
 members = [
   "rust/sbd-client",
   "rust/sbd-server",
-  "rust/sbd-server-test-suite",
+  "rust/sbd-o-bahn-server-tester",
 ]
 resolver = "2"
 
 [workspace.dependencies]
+sbd-client = { version = "0.0.1-alpha", path = "rust/sbd-client" }
+sbd-server = { version = "0.0.1-alpha", path = "rust/sbd-server" }
+sbd-o-bahn-server-tester = { version = "0.0.1-alpha", path = "rust/sbd-o-bahn-server-tester" }

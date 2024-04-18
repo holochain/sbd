@@ -2,7 +2,7 @@
 async fn main() {
     let mut args = std::env::args_os();
     args.next().unwrap();
-    let result = sbd_server_test_suite::run(
+    let result = sbd_o_bahn_server_tester::run(
         args.next().expect("Expected Sbd Server Suite Runner"),
     )
     .await;
