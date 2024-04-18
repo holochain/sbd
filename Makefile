@@ -1,4 +1,4 @@
-# sdb Makefile
+# sbd Makefile
 
 .PHONY: all test static
 
