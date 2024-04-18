@@ -12,6 +12,22 @@ pub struct SendBuf {
 }
 
 impl SendBuf {
+    /// We received a new rate limit from the server, update our records.
+    pub fn new_rate_limit(&mut self, limit: u64) {
+        if limit < self.limit_rate {
+            // rate limit updates are sent on a best effort,
+            // and there are network timing conditions to worry about.
+            // assume we accidentally sent a message while the new limit
+            // was in effect, and accout for that in a brute-force manner.
+
+            let now = self.origin.elapsed().as_nanos() as u64;
+
+            self.next_send_at = std::cmp::max(now, self.next_send_at)
+                + (MAX_MSG_SIZE as u64 * self.limit_rate);
+        }
+        self.limit_rate = limit;
+    }
+
     /// If we need to wait before taking the next step, this
     /// returns how long.
     pub fn next_step_dur(&self) -> Option<std::time::Duration> {
@@ -36,10 +52,12 @@ impl SendBuf {
 
         if let Some((_, data)) = self.buf.pop_front() {
             let now = self.origin.elapsed().as_nanos() as u64;
-            let next_send_at =
-                self.next_send_at + (data.len() as u64 * self.limit_rate);
-            self.next_send_at = std::cmp::max(now, next_send_at);
+
+            self.next_send_at = std::cmp::max(now, self.next_send_at)
+                + (data.len() as u64 * self.limit_rate);
+
             self.ws.send(data).await?;
+
             Ok(true)
         } else {
             Ok(false)
@@ -48,7 +66,7 @@ impl SendBuf {
 
     /// If our buffer is over our buffer size, do the work to get it under.
     /// Then queue up data to be sent out.
-    /// Note, you'll need to explicitly call `process_next_step()` or
+    /// Note, you'll need to explicitly call `write_next_queued()` or
     /// make additional sends in order to get this queued data actually sent.
     pub async fn send(&mut self, pk: &PubKey, mut data: &[u8]) -> Result<()> {
         while !self.space_free() {
@@ -57,6 +75,8 @@ impl SendBuf {
             }
             self.write_next_queued().await?;
         }
+
+        self.check_set_prebuffer();
 
         // first try to put into existing blocks
         for (qpk, qdata) in self.buf.iter_mut() {
@@ -78,7 +98,7 @@ impl SendBuf {
             let amt = std::cmp::min(data.len(), MAX_MSG_SIZE - init.len());
             init.extend_from_slice(&data[..amt]);
             data = &data[amt..];
-            self.buf.push_back((pk.clone(), init));
+            self.buf.push_back((*pk, init));
         }
 
         Ok(())
@@ -88,6 +108,16 @@ impl SendBuf {
 
     fn len(&self) -> usize {
         self.buf.iter().map(|(_, d)| d.len()).sum()
+    }
+
+    /// If we have an empty out buffer, set some rate-limit as a hack
+    /// for waiting a little bit to see if more sends come in and can
+    /// be aggregated
+    fn check_set_prebuffer(&mut self) {
+        if self.buf.is_empty() {
+            let hack = self.origin.elapsed().as_nanos() as u64 + 10_000_000; // 10 millis in nanos
+            self.next_send_at = std::cmp::max(hack, self.next_send_at)
+        }
     }
 
     /// Returns `true` if our total buffer size < out_buffer_size

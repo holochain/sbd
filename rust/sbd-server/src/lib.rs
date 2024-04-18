@@ -91,7 +91,7 @@ impl PubKey {
     /// Verify a signature with this pub key.
     pub fn verify(&self, sig: &[u8; 64], data: &[u8]) -> bool {
         use ed25519_dalek::Verifier;
-        if let Ok(k) = ed25519_dalek::VerifyingKey::from_bytes(&*self.0) {
+        if let Ok(k) = ed25519_dalek::VerifyingKey::from_bytes(&self.0) {
             k.verify(data, &ed25519_dalek::Signature::from_bytes(sig))
                 .is_ok()
         } else {
@@ -132,7 +132,7 @@ async fn check_accept_connection(
 
     let use_trusted_ip = config.trusted_ip_header.is_some();
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    let _ = tokio::time::timeout(config.idle_dur(), async {
         if !use_trusted_ip {
             // Do this check BEFORE handshake to avoid extra
             // server process when capable.

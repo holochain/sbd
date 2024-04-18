@@ -2,7 +2,8 @@ const DEF_IP_DENY_DIR: &str = ".";
 const DEF_IP_DENY_S: i32 = 600;
 const DEF_LIMIT_CLIENTS: i32 = 32768;
 const DEF_LIMIT_IP_BYTE_NANOS: i32 = 8000;
-const DEF_LIMIT_IP_BYTE_BURST: i32 = 32768;
+const DEF_LIMIT_IP_BYTE_BURST: i32 = 16 * 16 * 1024;
+const DEF_LIMIT_IDLE_MILLIS: i32 = 10_000;
 
 /// Configure and execute an SBD server.
 #[derive(clap::Parser, Debug)]
@@ -87,14 +88,23 @@ pub struct Config {
     /// The default value of 8000 results in ~1 mbps being allowed.
     /// If the default of 32768 connections were all sending this amount
     /// at the same time, the server would need a ~33.6 gbps connection.
+    /// This value divided by the count of connections from an ip will
+    /// be sent down to the client for individual rate limit.
     #[arg(long, default_value_t = DEF_LIMIT_IP_BYTE_NANOS)]
     pub limit_ip_byte_nanos: i32,
 
     /// Allow IPs to burst by this byte count.
     /// If the max message size is 16K, this value must be at least 16K.
-    /// The default value provides 2 * 16K for an additional buffer.
+    /// The default value provides 16 * 16K to allow for multiple connections
+    /// from a single ip address.
     #[arg(long, default_value_t = DEF_LIMIT_IP_BYTE_BURST)]
     pub limit_ip_byte_burst: i32,
+
+    /// How long in milliseconds connections can remain idle before being
+    /// closed. Clients must send either a message or a keepalive before
+    /// this time expires to keep the connection alive.
+    #[arg(long, default_value_t = DEF_LIMIT_IDLE_MILLIS)]
+    pub limit_idle_millis: i32,
 }
 
 impl Default for Config {
@@ -115,7 +125,14 @@ impl Default for Config {
             limit_clients: DEF_LIMIT_CLIENTS,
             limit_ip_byte_nanos: DEF_LIMIT_IP_BYTE_NANOS,
             limit_ip_byte_burst: DEF_LIMIT_IP_BYTE_BURST,
+            limit_idle_millis: DEF_LIMIT_IDLE_MILLIS,
         }
+    }
+}
+
+impl Config {
+    pub(crate) fn idle_dur(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.limit_idle_millis as u64)
     }
 }
 

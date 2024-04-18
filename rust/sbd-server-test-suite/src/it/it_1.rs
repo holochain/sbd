@@ -20,9 +20,9 @@ impl It for It1 {
                 async { r2.recv().await.ok_or(Error::other("closed")) },
             )?;
 
-            expect!(helper, result1.pub_key_ref() == &p2.0, "r1 recv from p2");
+            expect!(helper, result1.pub_key_ref() == p2.0, "r1 recv from p2");
             expect!(helper, result1.message() == b"world", "r1 got 'world'");
-            expect!(helper, result2.pub_key_ref() == &p1.0, "r2 recv from p1");
+            expect!(helper, result2.pub_key_ref() == p1.0, "r2 recv from p1");
             expect!(helper, result2.message() == b"hello", "r2 got 'hello'");
 
             Ok(())

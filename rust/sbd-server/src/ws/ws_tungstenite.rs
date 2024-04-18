@@ -32,8 +32,10 @@ where
             handshake::server, protocol::WebSocketConfig,
         };
         let mut trusted_ip = None;
-        let mut ws = WebSocketConfig::default();
-        ws.max_message_size = Some(MAX_MSG_BYTES as usize);
+        let ws = WebSocketConfig {
+            max_message_size: Some(MAX_MSG_BYTES as usize),
+            ..Default::default()
+        };
         struct Cb(tokio::sync::oneshot::Sender<server::Request>);
         impl server::Callback for Cb {
             fn on_request(

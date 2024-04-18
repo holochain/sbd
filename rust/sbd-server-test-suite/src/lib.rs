@@ -1,4 +1,7 @@
 #![deny(missing_docs)]
+// uhhh... clippy...
+#![allow(clippy::manual_async_fn)]
+
 //! Test suite for sbd server compliance.
 //!
 //! The command supplied to the run function must:
@@ -31,26 +34,7 @@ pub async fn run<S: AsRef<std::ffi::OsStr>>(cmd: S) -> Report {
 
     println!("GOT RUNNING ADDRS: {addrs:?}");
 
-    let config = sbd_client::SbdClientConfig {
-        allow_plain_text: true,
-        ..Default::default()
-    };
-
     it::exec_all(&addrs).await
-
-    /*
-    for addr in addrs {
-        if let Ok(client) = sbd_client::SbdClient::connect_config(
-            &format!("ws://{addr}"),
-            &sbd_client::DefaultCrypto::default(),
-            config,
-        ).await {
-            println!("client connect success");
-        }
-    }
-
-    todo!()
-    */
 }
 
 struct Server {

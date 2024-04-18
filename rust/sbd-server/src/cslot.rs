@@ -112,6 +112,8 @@ impl CSlot {
         });
     }
 
+    // oi clippy, this is super straight forward...
+    #[allow(clippy::type_complexity)]
     fn insert_and_get_rate_send_list(
         &self,
         ip: Arc<std::net::Ipv6Addr>,
@@ -222,7 +224,7 @@ impl CSlot {
     ) -> Result<(u64, usize, Arc<ws::WebSocket<MaybeTlsStream>>)> {
         let lock = self.0.lock().unwrap();
 
-        let index = match lock.pk_to_index.get(&pk) {
+        let index = match lock.pk_to_index.get(pk) {
             None => return Err(Error::other("no such peer")),
             Some(index) => *index,
         };
@@ -261,42 +263,45 @@ async fn top_task(
     weak: WeakCSlot,
     mut recv: tokio::sync::mpsc::UnboundedReceiver<TaskMsg>,
 ) {
-    while let Some(task_msg) = recv.recv().await {
-        match task_msg {
-            TaskMsg::NewWs {
-                uniq,
-                index,
-                ws,
-                ip,
-                pk,
-            } => {
-                tokio::select! {
-                    task_msg = recv.recv() => {
-                        match task_msg {
-                            Some(TaskMsg::Close) => (),
-                            _ => break,
-                        }
-                    },
-                    _ = ws_task(
-                        &config,
-                        &ip_rate,
-                        &weak,
-                        ws,
-                        ip,
-                        pk,
-                        uniq,
-                        index,
-                    ) => (),
-                }
-                if let Some(cslot) = weak.upgrade() {
-                    cslot.remove(uniq, index);
-                }
+    let mut item = recv.recv().await;
+    loop {
+        let uitem = match item {
+            None => break,
+            Some(uitem) => uitem,
+        };
+
+        item = if let TaskMsg::NewWs {
+            uniq,
+            index,
+            ws,
+            ip,
+            pk,
+        } = uitem
+        {
+            let i = tokio::select! {
+                i = recv.recv() => i,
+                _ = ws_task(
+                    &config,
+                    &ip_rate,
+                    &weak,
+                    ws,
+                    ip,
+                    pk,
+                    uniq,
+                    index,
+                ) => recv.recv().await,
+            };
+            if let Some(cslot) = weak.upgrade() {
+                cslot.remove(uniq, index);
             }
-            _ => (),
-        }
+            i
+        } else {
+            recv.recv().await
+        };
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn ws_task(
     config: &Arc<Config>,
     ip_rate: &ip_rate::IpRate,
@@ -307,7 +312,7 @@ async fn ws_task(
     uniq: u64,
     index: usize,
 ) {
-    if tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    let auth_res = tokio::time::timeout(config.idle_dur(), async {
         use rand::Rng;
         let mut nonce = [0xdb; 32];
         rand::thread_rng().fill(&mut nonce[..]);
@@ -330,7 +335,8 @@ async fn ws_task(
 
         // NOTE: the byte_nanos limit is sent during the cslot insert
 
-        // TODO: ws.send(cmd::SbdCmd::limit_idle_millis(config.?).await?;
+        ws.send(cmd::SbdCmd::limit_idle_millis(config.limit_idle_millis))
+            .await?;
 
         if let Some(cslot) = weak_cslot.upgrade() {
             cslot.mark_ready(uniq, index);
@@ -342,13 +348,15 @@ async fn ws_task(
 
         Ok(())
     })
-    .await
-    .is_err()
-    {
+    .await;
+
+    if auth_res.is_err() {
         return;
     }
 
-    while let Ok(payload) = ws.recv().await {
+    while let Ok(Ok(payload)) =
+        tokio::time::timeout(config.idle_dur(), ws.recv()).await
+    {
         if !ip_rate.is_ok(&ip, payload.len()).await {
             break;
         }

@@ -15,6 +15,7 @@ pub struct WsRawConnect {
     /// Setting this to `true` allows `ws://` scheme.
     pub allow_plain_text: bool,
 
+    #[allow(unused_variables)]
     /// Setting this to `true` disables certificate verification on `wss://`
     /// scheme. WARNING: this is a dangerous configuration and should not
     /// be used outside of testing (i.e. self-signed tls certificates).
@@ -28,7 +29,7 @@ impl WsRawConnect {
             full_url,
             max_message_size,
             allow_plain_text,
-            danger_disable_certificate_check,
+            ..
         } = self;
 
         let scheme_ws = full_url.starts_with("ws://");
@@ -48,7 +49,7 @@ impl WsRawConnect {
             Some(host) => host.to_string(),
             None => return Err(Error::other("invalid url")),
         };
-        let port = request.uri().port_u16().unwrap_or_else(|| {
+        let port = request.uri().port_u16().unwrap_or({
             if scheme_ws {
                 80
             } else {
@@ -73,10 +74,11 @@ impl WsRawConnect {
             tokio_tungstenite::MaybeTlsStream::Rustls(tls)
         };
 
-        let mut config =
-            tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default(
-            );
-        config.max_message_size = Some(max_message_size);
+        let config =
+            tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+                max_message_size: Some(max_message_size),
+                ..Default::default()
+            };
 
         let (ws, _res) = tokio_tungstenite::client_async_with_config(
             request,
@@ -174,7 +176,7 @@ fn priv_system_tls() -> Arc<rustls::ClientConfig> {
     for cert in rustls_native_certs::load_native_certs()
         .expect("failed to load system tls certs")
     {
-        roots.add(cert.into()).expect("faild to add cert to root");
+        roots.add(cert).expect("faild to add cert to root");
     }
 
     Arc::new(
