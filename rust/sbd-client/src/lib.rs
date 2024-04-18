@@ -4,6 +4,7 @@
 use std::io::{Error, Result};
 use std::sync::Arc;
 
+/// defined by the sbd spec
 const MAX_MSG_SIZE: usize = 16000;
 
 #[cfg(feature = "raw_client")]
@@ -169,27 +170,21 @@ impl SbdClient {
         .await?;
 
         let handshake = recv.recv().await?;
-        if handshake.len() != 4 + 4 + 4 + 32 {
+        if handshake.len() != 4 + 4 + 32 {
             return Err(Error::other("invalid handshake"));
         }
 
-        let limit_msg = i32::from_be_bytes([
+        let limit_rate = i32::from_be_bytes([
             handshake[4],
             handshake[5],
             handshake[6],
             handshake[7],
         ]);
-        let limit_rate = i32::from_be_bytes([
-            handshake[8],
-            handshake[9],
-            handshake[10],
-            handshake[11],
-        ]);
 
-        println!("msg: {limit_msg}, rate: {limit_rate}");
+        println!("rate: {limit_rate}");
 
         let mut nonce = [0; 32];
-        nonce.copy_from_slice(&handshake[12..]);
+        nonce.copy_from_slice(&handshake[8..]);
 
         let sig = crypto.sign(&nonce);
 

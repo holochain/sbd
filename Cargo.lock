@@ -1018,6 +1018,7 @@ dependencies = [
  "rcgen",
  "sbd-client",
  "serde_json",
+ "slab",
  "tempfile",
  "tokio",
  "tokio-tungstenite",

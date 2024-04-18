@@ -1,8 +1,6 @@
 const DEF_IP_DENY_DIR: &str = ".";
 const DEF_IP_DENY_S: i32 = 600;
-const DEF_LIMIT_FROM_IP: i32 = 4;
 const DEF_LIMIT_CLIENTS: i32 = 32768;
-const DEF_LIMIT_MESSAGE_BYTES: i32 = 16000;
 const DEF_LIMIT_IP_BYTE_NANOS: i32 = 8000;
 const DEF_LIMIT_IP_BYTE_BURST: i32 = 32768;
 
@@ -81,35 +79,20 @@ pub struct Config {
     #[arg(long)]
     pub bind_prometheus: Option<String>,
 
-    /// Limit connection count from a single IP.
-    #[arg(long, default_value_t = DEF_LIMIT_FROM_IP)]
-    pub limit_from_ip: i32,
-
     /// Limit client connections.
     #[arg(long, default_value_t = DEF_LIMIT_CLIENTS)]
     pub limit_clients: i32,
-
-    /// Limit the size of individual messages in bytes.
-    /// The default is 384 bytes short of 16KiB to account for overhead.
-    #[arg(long, default_value_t = DEF_LIMIT_MESSAGE_BYTES)]
-    pub limit_message_bytes: i32,
 
     /// How often in nanoseconds 1 byte is allowed to be sent from an IP.
     /// The default value of 8000 results in ~1 mbps being allowed.
     /// If the default of 32768 connections were all sending this amount
     /// at the same time, the server would need a ~33.6 gbps connection.
-    /// Note, this limit is sent to clients as the limit for an individual
-    /// connection. The limit on the server will be multiplied by the value
-    /// of `limit_from_ip`.
     #[arg(long, default_value_t = DEF_LIMIT_IP_BYTE_NANOS)]
     pub limit_ip_byte_nanos: i32,
 
     /// Allow IPs to burst by this byte count.
     /// If the max message size is 16K, this value must be at least 16K.
     /// The default value provides 2 * 16K for an additional buffer.
-    /// Note, this limit is not sent to clients but is the limit for an
-    /// individual connection. The limit on the server will be multiplied
-    /// by the value of `limit_from_ip`.
     #[arg(long, default_value_t = DEF_LIMIT_IP_BYTE_BURST)]
     pub limit_ip_byte_burst: i32,
 }
@@ -129,9 +112,7 @@ impl Default for Config {
             back_allow_ip: Vec::new(),
             back_open: Vec::new(),
             bind_prometheus: None,
-            limit_from_ip: DEF_LIMIT_FROM_IP,
             limit_clients: DEF_LIMIT_CLIENTS,
-            limit_message_bytes: DEF_LIMIT_MESSAGE_BYTES,
             limit_ip_byte_nanos: DEF_LIMIT_IP_BYTE_NANOS,
             limit_ip_byte_burst: DEF_LIMIT_IP_BYTE_BURST,
         }

@@ -18,5 +18,10 @@ fn suite() {
         .unwrap();
 
     println!("RUNNING the test suite {:?}", suite.path());
-    assert!(suite.command().arg(server.path()).status().unwrap().success());
+    assert!(suite
+        .command()
+        .arg(server.path())
+        .status()
+        .unwrap()
+        .success());
 }

@@ -33,7 +33,7 @@ where
         };
         let mut trusted_ip = None;
         let mut ws = WebSocketConfig::default();
-        ws.max_message_size = Some(config.limit_message_bytes as usize);
+        ws.max_message_size = Some(MAX_MSG_BYTES as usize);
         struct Cb(tokio::sync::oneshot::Sender<server::Request>);
         impl server::Callback for Cb {
             fn on_request(
