@@ -11,14 +11,13 @@ impl IpDeny {
     }
 
     /// Check if a given ip is blocked.
-    pub async fn is_blocked(&self, _ip: std::net::Ipv6Addr) -> Result<bool> {
+    pub async fn is_blocked(&self, _ip: &Arc<std::net::Ipv6Addr>) -> bool {
         // THIS IS A STUB!!
-        Ok(false)
+        false
     }
 
     /// Block a given ip.
-    pub async fn block(&self, _ip: std::net::Ipv6Addr) -> Result<()> {
+    pub async fn block(&self, _ip: &Arc<std::net::Ipv6Addr>) {
         // THIS IS A STUB!!
-        Ok(())
     }
 }

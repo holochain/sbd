@@ -62,8 +62,7 @@ struct Server {
 impl Server {
     pub async fn spawn<S: AsRef<std::ffi::OsStr>>(cmd: S) -> Result<Self> {
         let mut cmd = tokio::process::Command::new(cmd);
-        cmd
-            .kill_on_drop(true)
+        cmd.kill_on_drop(true)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped());
 
@@ -71,7 +70,8 @@ impl Server {
         let mut child = cmd.spawn()?;
         let stdin = child.stdin.take().unwrap();
 
-        let mut stdout = tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
+        let mut stdout =
+            tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
 
         if let Some(line) = stdout.next_line().await? {
             if line != "CMD:READY" {

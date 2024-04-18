@@ -20,7 +20,7 @@ pub trait Crypto {
     fn pub_key(&self) -> &[u8; 32];
 
     /// Sign the nonce.
-    fn sign(&self, nonce: &[u8; 32]) -> [u8; 64];
+    fn sign(&self, nonce: &[u8]) -> [u8; 64];
 }
 
 #[cfg(feature = "crypto")]
@@ -42,9 +42,9 @@ mod default_crypto {
             &self.0
         }
 
-        fn sign(&self, nonce: &[u8; 32]) -> [u8; 64] {
+        fn sign(&self, nonce: &[u8]) -> [u8; 64] {
             use ed25519_dalek::Signer;
-            self.1.sign(&nonce[..]).to_bytes()
+            self.1.sign(nonce).to_bytes()
         }
     }
 }
@@ -62,6 +62,22 @@ impl std::fmt::Debug for PubKey {
             .encode(&self.0[..]);
         f.write_str(&out)
     }
+}
+
+const CMD_FLAG: &[u8; 28] = &[0; 28];
+
+enum MsgType<'t> {
+    Msg {
+        #[allow(dead_code)]
+        pub_key: &'t [u8],
+        #[allow(dead_code)]
+        message: &'t [u8],
+    },
+    LimitByteNanos(i32),
+    LimitIdleMillis(i32),
+    AuthReq(&'t [u8]),
+    Ready,
+    Unknown,
 }
 
 /// A message received from a remote.
@@ -84,6 +100,47 @@ impl Msg {
     /// Get a reference to the slice containing the message data.
     pub fn message(&self) -> &[u8] {
         &self.0[32..]
+    }
+
+    // -- private -- //
+
+    fn parse(&self) -> Result<MsgType<'_>> {
+        if self.0.len() < 32 {
+            return Err(Error::other("invalid message length"));
+        }
+        if &self.0[..28] == CMD_FLAG {
+            match &self.0[28..32] {
+                b"lbrt" => {
+                    if self.0.len() != 32 + 4 {
+                        return Err(Error::other("invalid lbrt length"));
+                    }
+                    Ok(MsgType::LimitByteNanos(i32::from_be_bytes(
+                        self.0[32..].try_into().unwrap(),
+                    )))
+                }
+                b"lidl" => {
+                    if self.0.len() != 32 + 4 {
+                        return Err(Error::other("invalid lidl length"));
+                    }
+                    Ok(MsgType::LimitIdleMillis(i32::from_be_bytes(
+                        self.0[32..].try_into().unwrap(),
+                    )))
+                }
+                b"areq" => {
+                    if self.0.len() != 32 + 32 {
+                        return Err(Error::other("invalid areq length"));
+                    }
+                    Ok(MsgType::AuthReq(&self.0[32..]))
+                }
+                b"srdy" => Ok(MsgType::Ready),
+                _ => Ok(MsgType::Unknown),
+            }
+        } else {
+            Ok(MsgType::Msg {
+                pub_key: &self.0[..32],
+                message: &self.0[32..],
+            })
+        }
     }
 }
 
@@ -169,40 +226,51 @@ impl SbdClient {
         .connect()
         .await?;
 
-        let handshake = recv.recv().await?;
-        if handshake.len() != 4 + 4 + 32 {
-            return Err(Error::other("invalid handshake"));
+        let mut limit_byte_nanos = 8000;
+
+        loop {
+            match Msg(recv.recv().await?).parse()? {
+                MsgType::Msg { .. } => {
+                    return Err(Error::other("invalid handshake"))
+                }
+                MsgType::LimitByteNanos(l) => limit_byte_nanos = l,
+                MsgType::LimitIdleMillis(_) => (),
+                MsgType::AuthReq(nonce) => {
+                    let sig = crypto.sign(&nonce);
+                    let mut auth_res = Vec::with_capacity(32 + 64);
+                    auth_res.extend_from_slice(CMD_FLAG);
+                    auth_res.extend_from_slice(b"ares");
+                    auth_res.extend_from_slice(&sig);
+                    send.send(auth_res).await?;
+                }
+                MsgType::Ready => break,
+                MsgType::Unknown => (),
+            }
         }
 
-        let limit_rate = i32::from_be_bytes([
-            handshake[4],
-            handshake[5],
-            handshake[6],
-            handshake[7],
-        ]);
-
-        println!("rate: {limit_rate}");
-
-        let mut nonce = [0; 32];
-        nonce.copy_from_slice(&handshake[8..]);
-
-        let sig = crypto.sign(&nonce);
-
-        send.send(sig.to_vec()).await?;
+        println!("limit_byte_nanos: {limit_byte_nanos}");
 
         let (recv_send, recv_recv) = tokio::sync::mpsc::channel(4);
         let read_task = tokio::task::spawn(async move {
             while let Ok(data) = recv.recv().await {
-                if data.len() < 32 {
-                    break;
-                }
+                let data = Msg(data);
 
-                if &data[..32] == &[0; 32] {
-                    break;
-                }
-
-                if recv_send.send(Msg(data)).await.is_err() {
-                    break;
+                match match data.parse() {
+                    Ok(data) => data,
+                    Err(_) => break,
+                } {
+                    MsgType::Msg { .. } => {
+                        if recv_send.send(data).await.is_err() {
+                            break;
+                        }
+                    }
+                    MsgType::LimitByteNanos(rate) => {
+                        eprintln!("UPDATED RATE {rate}");
+                    }
+                    MsgType::LimitIdleMillis(_) => todo!(),
+                    MsgType::AuthReq(_) => break,
+                    MsgType::Ready => (),
+                    MsgType::Unknown => (),
                 }
             }
 
@@ -214,7 +282,7 @@ impl SbdClient {
             buf: std::collections::VecDeque::new(),
             out_buffer_size: config.out_buffer_size,
             origin: tokio::time::Instant::now(),
-            limit_rate: (limit_rate as f64 * 0.9) as u64,
+            limit_rate: (limit_byte_nanos as f64 * 0.9) as u64,
             next_send_at: 0,
         };
         let send_buf = Arc::new(tokio::sync::Mutex::new(send_buf));

@@ -13,10 +13,7 @@ impl It for It1 {
                 helper.connect_client(),
             )?;
 
-            tokio::try_join!(
-                c1.send(&p2, b"hello"),
-                c2.send(&p1, b"world"),
-            )?;
+            tokio::try_join!(c1.send(&p2, b"hello"), c2.send(&p1, b"world"),)?;
 
             let (result1, result2) = tokio::try_join!(
                 async { r1.recv().await.ok_or(Error::other("closed")) },

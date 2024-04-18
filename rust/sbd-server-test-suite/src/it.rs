@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::io::{Result, Error};
+use std::io::{Error, Result};
 
 use crate::Report;
 
@@ -30,14 +30,27 @@ impl<'h> TestHelper<'h> {
     }
 
     /// expect a condition to be true
-    pub fn expect(&mut self, file: &'static str, line: u32, cond: bool, note: &'static str) {
+    pub fn expect(
+        &mut self,
+        file: &'static str,
+        line: u32,
+        cond: bool,
+        note: &'static str,
+    ) {
         if !cond {
             self.err_list.push(format!("{file}:{line}: failed: {note}"));
         }
     }
 
     /// connect a client
-    pub async fn connect_client(&self) -> Result<(sbd_client::SbdClient, String, sbd_client::PubKey, sbd_client::MsgRecv)> {
+    pub async fn connect_client(
+        &self,
+    ) -> Result<(
+        sbd_client::SbdClient,
+        String,
+        sbd_client::PubKey,
+        sbd_client::MsgRecv,
+    )> {
         for addr in self.addr_list.iter() {
             if let Ok(client) = sbd_client::SbdClient::connect_config(
                 &format!("ws://{addr}"),
@@ -46,7 +59,9 @@ impl<'h> TestHelper<'h> {
                     allow_plain_text: true,
                     ..Default::default()
                 },
-            ).await {
+            )
+            .await
+            {
                 return Ok(client);
             }
         }

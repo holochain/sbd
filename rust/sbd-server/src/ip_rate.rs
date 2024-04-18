@@ -1,23 +1,26 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-type Map = HashMap<std::net::Ipv6Addr, u64>;
+type Map = HashMap<Arc<std::net::Ipv6Addr>, u64>;
 
-#[derive(Clone)]
 pub struct IpRate {
     origin: tokio::time::Instant,
     map: Arc<Mutex<Map>>,
     limit: u64,
     burst: u64,
+    ip_deny: crate::ip_deny::IpDeny,
 }
 
 impl IpRate {
-    pub fn new(limit: u64, burst: u64) -> Self {
+    /// Construct a new IpRate limit instance.
+    pub fn new(config: Arc<crate::Config>) -> Self {
         Self {
             origin: tokio::time::Instant::now(),
             map: Arc::new(Mutex::new(HashMap::new())),
-            limit,
-            burst,
+            limit: config.limit_ip_byte_nanos as u64,
+            burst: config.limit_ip_byte_burst as u64
+                * config.limit_ip_byte_nanos as u64,
+            ip_deny: crate::ip_deny::IpDeny::new(config),
         }
     }
 
@@ -41,29 +44,46 @@ impl IpRate {
         });
     }
 
+    /// Return true if this ip is blocked.
+    pub async fn is_blocked(&self, ip: &Arc<std::net::Ipv6Addr>) -> bool {
+        self.ip_deny.is_blocked(ip).await
+    }
+
     /// Return true if we are not over the rate limit.
-    pub fn is_ok(&self, ip: std::net::Ipv6Addr, bytes: usize) -> bool {
+    pub async fn is_ok(
+        &self,
+        ip: &Arc<std::net::Ipv6Addr>,
+        bytes: usize,
+    ) -> bool {
         // multiply by our rate allowed per byte
         let rate_add = bytes as u64 * self.limit;
 
         // get now
         let now = self.origin.elapsed().as_nanos() as u64;
 
-        // lock the map mutex
-        let mut lock = self.map.lock().unwrap();
+        let is_ok = {
+            // lock the map mutex
+            let mut lock = self.map.lock().unwrap();
 
-        // get the entry (default to now)
-        let e = lock.entry(ip).or_insert(now);
+            // get the entry (default to now)
+            let e = lock.entry(ip.clone()).or_insert(now);
 
-        // if we've already used time greater than now use that,
-        // otherwise consider we're starting from scratch
-        let cur = std::cmp::max(*e, now) + rate_add;
+            // if we've already used time greater than now use that,
+            // otherwise consider we're starting from scratch
+            let cur = std::cmp::max(*e, now) + rate_add;
 
-        // update the map with the current limit
-        *e = cur;
+            // update the map with the current limit
+            *e = cur;
 
-        // subtract now back out to see if we're greater than our burst
-        cur - now <= self.burst
+            // subtract now back out to see if we're greater than our burst
+            cur - now <= self.burst
+        };
+
+        if !is_ok {
+            self.ip_deny.block(ip).await;
+        }
+
+        is_ok
     }
 }
 
@@ -71,21 +91,32 @@ impl IpRate {
 mod tests {
     use super::*;
 
-    const ADDR1: std::net::Ipv6Addr =
-        std::net::Ipv6Addr::new(1, 1, 1, 1, 1, 1, 1, 1);
+    fn test_new(limit: u64, burst: u64) -> IpRate {
+        IpRate {
+            origin: tokio::time::Instant::now(),
+            map: Arc::new(Mutex::new(HashMap::new())),
+            limit,
+            burst,
+            ip_deny: crate::ip_deny::IpDeny::new(Arc::new(
+                crate::Config::default(),
+            )),
+        }
+    }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn check_one_to_one() {
-        let rate = IpRate::new(1, 1);
+        let addr1 = Arc::new(std::net::Ipv6Addr::new(1, 1, 1, 1, 1, 1, 1, 1));
+
+        let rate = test_new(1, 1);
 
         for _ in 0..10 {
             // should always be ok when advancing with time
             tokio::time::advance(std::time::Duration::from_nanos(1)).await;
-            assert!(rate.is_ok(ADDR1, 1));
+            assert!(rate.is_ok(&addr1, 1).await);
         }
 
         // but one more without a time advance fails
-        assert!(!rate.is_ok(ADDR1, 1));
+        assert!(!rate.is_ok(&addr1, 1).await);
 
         tokio::time::advance(std::time::Duration::from_nanos(1)).await;
 
@@ -107,16 +138,18 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn check_burst() {
-        let rate = IpRate::new(1, 5);
+        let addr1 = Arc::new(std::net::Ipv6Addr::new(1, 1, 1, 1, 1, 1, 1, 1));
+
+        let rate = test_new(1, 5);
 
         for _ in 0..5 {
-            assert!(rate.is_ok(ADDR1, 1));
+            assert!(rate.is_ok(&addr1, 1).await);
         }
 
-        assert!(!rate.is_ok(ADDR1, 1));
+        assert!(!rate.is_ok(&addr1, 1).await);
 
         tokio::time::advance(std::time::Duration::from_nanos(2)).await;
-        assert!(rate.is_ok(ADDR1, 1));
+        assert!(rate.is_ok(&addr1, 1).await);
 
         tokio::time::advance(std::time::Duration::from_secs(10)).await;
         tokio::time::advance(std::time::Duration::from_nanos(4)).await;
@@ -132,16 +165,18 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn check_limit_mult() {
-        let rate = IpRate::new(3, 13);
+        let addr1 = Arc::new(std::net::Ipv6Addr::new(1, 1, 1, 1, 1, 1, 1, 1));
 
-        assert!(rate.is_ok(ADDR1, 2));
-        assert!(rate.is_ok(ADDR1, 2));
-        assert!(!rate.is_ok(ADDR1, 2));
+        let rate = test_new(3, 13);
+
+        assert!(rate.is_ok(&addr1, 2).await);
+        assert!(rate.is_ok(&addr1, 2).await);
+        assert!(!rate.is_ok(&addr1, 2).await);
 
         tokio::time::advance(std::time::Duration::from_secs(10)).await;
 
-        assert!(rate.is_ok(ADDR1, 2));
-        assert!(rate.is_ok(ADDR1, 2));
-        assert!(!rate.is_ok(ADDR1, 2));
+        assert!(rate.is_ok(&addr1, 2).await);
+        assert!(rate.is_ok(&addr1, 2).await);
+        assert!(!rate.is_ok(&addr1, 2).await);
     }
 }
