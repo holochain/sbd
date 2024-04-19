@@ -190,10 +190,12 @@ impl CSlot {
         let rate_send_list = self.insert_and_get_rate_send_list(ip, pk, ws);
 
         if let Some(rate_send_list) = rate_send_list {
-            let mut rate = limit_ip_byte_nanos / rate_send_list.len() as i32;
-            if rate < 1 {
-                rate = 1;
+            let mut rate =
+                limit_ip_byte_nanos as u64 * rate_send_list.len() as u64;
+            if rate > i32::MAX as u64 {
+                rate = i32::MAX as u64;
             }
+            let rate = rate as i32;
 
             for (uniq, index, weak_ws) in rate_send_list {
                 if let Some(ws) = weak_ws.upgrade() {
@@ -278,23 +280,30 @@ async fn top_task(
             pk,
         } = uitem
         {
-            let i = tokio::select! {
-                i = recv.recv() => i,
+            let next_i = tokio::select! {
+                i = recv.recv() => Some(i),
                 _ = ws_task(
                     &config,
                     &ip_rate,
                     &weak,
-                    ws,
+                    &ws,
                     ip,
                     pk,
                     uniq,
                     index,
-                ) => recv.recv().await,
+                ) => None,
             };
+
+            ws.close().await;
+            drop(ws);
             if let Some(cslot) = weak.upgrade() {
                 cslot.remove(uniq, index);
             }
-            i
+
+            match next_i {
+                Some(i) => i,
+                None => recv.recv().await,
+            }
         } else {
             recv.recv().await
         };
@@ -306,7 +315,7 @@ async fn ws_task(
     config: &Arc<Config>,
     ip_rate: &ip_rate::IpRate,
     weak_cslot: &WeakCSlot,
-    ws: Arc<ws::WebSocket<MaybeTlsStream>>,
+    ws: &Arc<ws::WebSocket<MaybeTlsStream>>,
     ip: Arc<std::net::Ipv6Addr>,
     pk: PubKey,
     uniq: u64,

@@ -26,6 +26,7 @@ hyper = { version = "1.2.0", features = ["http1", "server"], optional = true }
 [dev-dependencies]
 escargot = { version = "0.5.10", features = [ "print" ] }
 rcgen = "0.13.1"
+sbd-client = { workspace = true, features = [ "raw_client" ] }
 serde_json = "1.0.116"
 tempfile = "3.10.1"
 tokio = { version = "1.37.0", features = [ "test-util" ] }

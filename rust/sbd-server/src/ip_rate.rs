@@ -17,9 +17,9 @@ impl IpRate {
         Self {
             origin: tokio::time::Instant::now(),
             map: Arc::new(Mutex::new(HashMap::new())),
-            limit: config.limit_ip_byte_nanos as u64,
+            limit: config.limit_ip_byte_nanos() as u64,
             burst: config.limit_ip_byte_burst as u64
-                * config.limit_ip_byte_nanos as u64,
+                * config.limit_ip_byte_nanos() as u64,
             ip_deny: crate::ip_deny::IpDeny::new(config),
         }
     }

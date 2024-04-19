@@ -1,7 +1,7 @@
 const DEF_IP_DENY_DIR: &str = ".";
 const DEF_IP_DENY_S: i32 = 600;
 const DEF_LIMIT_CLIENTS: i32 = 32768;
-const DEF_LIMIT_IP_BYTE_NANOS: i32 = 8000;
+const DEF_LIMIT_IP_KBPS: i32 = 1000;
 const DEF_LIMIT_IP_BYTE_BURST: i32 = 16 * 16 * 1024;
 const DEF_LIMIT_IDLE_MILLIS: i32 = 10_000;
 
@@ -84,19 +84,19 @@ pub struct Config {
     #[arg(long, default_value_t = DEF_LIMIT_CLIENTS)]
     pub limit_clients: i32,
 
-    /// How often in nanoseconds 1 byte is allowed to be sent from an IP.
-    /// The default value of 8000 results in ~1 mbps being allowed.
+    /// Rate limit connections to this kilobits per second.
+    /// The default value of 1000 obviously limits connections to 1 mbps.
     /// If the default of 32768 connections were all sending this amount
-    /// at the same time, the server would need a ~33.6 gbps connection.
-    /// This value divided by the count of connections from an ip will
-    /// be sent down to the client for individual rate limit.
-    #[arg(long, default_value_t = DEF_LIMIT_IP_BYTE_NANOS)]
-    pub limit_ip_byte_nanos: i32,
+    /// at the same time, the server would need a ~33 gbps connection.
+    /// The rate limit passed to clients will be divided by the number
+    /// of open connections for a given ip address.
+    #[arg(long, default_value_t = DEF_LIMIT_IP_KBPS)]
+    pub limit_ip_kbps: i32,
 
     /// Allow IPs to burst by this byte count.
     /// If the max message size is 16K, this value must be at least 16K.
     /// The default value provides 16 * 16K to allow for multiple connections
-    /// from a single ip address.
+    /// from a single ip address sending full messages at the same time.
     #[arg(long, default_value_t = DEF_LIMIT_IP_BYTE_BURST)]
     pub limit_ip_byte_burst: i32,
 
@@ -123,7 +123,7 @@ impl Default for Config {
             back_open: Vec::new(),
             bind_prometheus: None,
             limit_clients: DEF_LIMIT_CLIENTS,
-            limit_ip_byte_nanos: DEF_LIMIT_IP_BYTE_NANOS,
+            limit_ip_kbps: DEF_LIMIT_IP_KBPS,
             limit_ip_byte_burst: DEF_LIMIT_IP_BYTE_BURST,
             limit_idle_millis: DEF_LIMIT_IDLE_MILLIS,
         }
@@ -133,6 +133,12 @@ impl Default for Config {
 impl Config {
     pub(crate) fn idle_dur(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.limit_idle_millis as u64)
+    }
+
+    /// convert kbps into the nanosecond weight of each byte
+    /// (easier to rate limit with this value)
+    pub(crate) fn limit_ip_byte_nanos(&self) -> i32 {
+        8_000_000 / self.limit_ip_kbps
     }
 }
 

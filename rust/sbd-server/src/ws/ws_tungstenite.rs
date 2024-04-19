@@ -127,9 +127,10 @@ where
 
     /// Send to the websocket.
     pub async fn send(&self, payload: Payload<'_>) -> Result<()> {
-        let mut write = self.write.lock().await;
         use futures::sink::SinkExt;
         use tokio_tungstenite::tungstenite::protocol::Message;
+
+        let mut write = self.write.lock().await;
         let v = match payload {
             Payload::Slice(s) => s.to_vec(),
             Payload::SliceMut(s) => s.to_vec(),
@@ -139,5 +140,12 @@ where
         write.send(Message::binary(v)).await.map_err(Error::other)?;
         write.flush().await.map_err(Error::other)?;
         Ok(())
+    }
+
+    /// Close the websocket.
+    pub async fn close(&self) {
+        use futures::sink::SinkExt;
+
+        let _ = self.write.lock().await.close().await;
     }
 }

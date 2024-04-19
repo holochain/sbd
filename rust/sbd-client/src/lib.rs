@@ -226,37 +226,20 @@ impl SbdClient {
         .connect()
         .await?;
 
-        let mut limit_byte_nanos = 8000;
-        let mut limit_idle_millis = 10_000;
+        let raw_client::Handshake {
+            limit_byte_nanos,
+            limit_idle_millis,
+            bytes_sent,
+        } = raw_client::Handshake::handshake(&mut send, &mut recv, crypto)
+            .await?;
 
-        loop {
-            match Msg(recv.recv().await?).parse()? {
-                MsgType::Msg { .. } => {
-                    return Err(Error::other("invalid handshake"))
-                }
-                MsgType::LimitByteNanos(l) => limit_byte_nanos = l,
-                MsgType::LimitIdleMillis(l) => limit_idle_millis = l,
-                MsgType::AuthReq(nonce) => {
-                    let sig = crypto.sign(nonce);
-                    let mut auth_res = Vec::with_capacity(32 + 64);
-                    auth_res.extend_from_slice(CMD_FLAG);
-                    auth_res.extend_from_slice(b"ares");
-                    auth_res.extend_from_slice(&sig);
-                    send.send(auth_res).await?;
-                }
-                MsgType::Ready => break,
-                MsgType::Unknown => (),
-            }
-        }
-
-        let send_buf = send_buf::SendBuf {
-            ws: send,
-            buf: std::collections::VecDeque::new(),
-            out_buffer_size: config.out_buffer_size,
-            origin: tokio::time::Instant::now(),
-            limit_rate: (limit_byte_nanos as f64 * 0.9) as u64,
-            next_send_at: 0,
-        };
+        let send_buf = send_buf::SendBuf::new(
+            send,
+            config.out_buffer_size,
+            (limit_byte_nanos as f64 * 1.1) as u64,
+            std::time::Duration::from_millis((limit_idle_millis / 2) as u64),
+            bytes_sent,
+        );
         let send_buf = Arc::new(tokio::sync::Mutex::new(send_buf));
 
         let send_buf2 = send_buf.clone();
@@ -278,7 +261,7 @@ impl SbdClient {
                         send_buf2
                             .lock()
                             .await
-                            .new_rate_limit((rate as f64 * 0.9) as u64);
+                            .new_rate_limit((rate as f64 * 1.1) as u64);
                     }
                     MsgType::LimitIdleMillis(_) => break,
                     MsgType::AuthReq(_) => break,
@@ -292,35 +275,14 @@ impl SbdClient {
 
         let send_buf2 = send_buf.clone();
         let write_task = tokio::task::spawn(async move {
-            let mut last_send = tokio::time::Instant::now();
             loop {
                 if let Some(dur) = send_buf2.lock().await.next_step_dur() {
                     tokio::time::sleep(dur).await;
                 }
                 match send_buf2.lock().await.write_next_queued().await {
                     Err(_) => break,
-                    Ok(true) => {
-                        last_send = tokio::time::Instant::now();
-                    }
+                    Ok(true) => (),
                     Ok(false) => {
-                        if last_send.elapsed().as_millis() as u64
-                            > limit_idle_millis as u64 / 2
-                        {
-                            let mut data = Vec::with_capacity(32);
-                            data.extend_from_slice(CMD_FLAG);
-                            data.extend_from_slice(b"keep");
-                            if send_buf2
-                                .lock()
-                                .await
-                                .ws
-                                .send(data)
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                            last_send = tokio::time::Instant::now();
-                        }
                         tokio::time::sleep(std::time::Duration::from_millis(
                             10,
                         ))

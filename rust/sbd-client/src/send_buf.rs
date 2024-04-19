@@ -8,10 +8,39 @@ pub struct SendBuf {
     pub out_buffer_size: usize,
     pub origin: tokio::time::Instant,
     pub limit_rate: u64,
+    pub idle_keepalive_nanos: u64,
     pub next_send_at: u64,
+    pub last_send: u64,
 }
 
 impl SendBuf {
+    /// construct a new send buf
+    pub fn new(
+        ws: raw_client::WsRawSend,
+        out_buffer_size: usize,
+        limit_rate: u64,
+        idle_keepalive: std::time::Duration,
+        pre_sent_bytes: usize,
+    ) -> Self {
+        let mut this = Self {
+            ws,
+            buf: VecDeque::default(),
+            out_buffer_size,
+            origin: tokio::time::Instant::now(),
+            limit_rate,
+            idle_keepalive_nanos: idle_keepalive.as_nanos() as u64,
+            next_send_at: 0,
+            last_send: 0,
+        };
+
+        let now = this.origin.elapsed().as_nanos() as u64;
+
+        this.next_send_at = std::cmp::max(now, this.next_send_at)
+            + (pre_sent_bytes as u64 * this.limit_rate);
+
+        this
+    }
+
     /// We received a new rate limit from the server, update our records.
     pub fn new_rate_limit(&mut self, limit: u64) {
         if limit < self.limit_rate {
@@ -32,8 +61,18 @@ impl SendBuf {
     /// returns how long.
     pub fn next_step_dur(&self) -> Option<std::time::Duration> {
         let now = self.origin.elapsed().as_nanos() as u64;
+
+        if now - self.last_send >= self.idle_keepalive_nanos {
+            // we need a keepalive now, don't wait
+            return None;
+        }
+
         if now < self.next_send_at {
-            Some(std::time::Duration::from_nanos(self.next_send_at - now))
+            let need_keepalive_at =
+                self.idle_keepalive_nanos - (now - self.last_send);
+            let nanos =
+                std::cmp::min(need_keepalive_at, self.next_send_at - now);
+            Some(std::time::Duration::from_nanos(nanos))
         } else {
             None
         }
@@ -44,19 +83,23 @@ impl SendBuf {
     /// out the next queued block on the low-level websocket.
     /// Returns true if it did something, false if it did not.
     pub async fn write_next_queued(&mut self) -> Result<bool> {
-        // check the dur again, just to avoid race conditions
-        // sending too much data at once
+        let now = self.origin.elapsed().as_nanos() as u64;
+
+        // first check if we need to keepalive
+        if now - self.last_send >= self.idle_keepalive_nanos {
+            let mut data = Vec::with_capacity(32);
+            data.extend_from_slice(CMD_FLAG);
+            data.extend_from_slice(b"keep");
+            self.raw_send(now, data).await?;
+            return Ok(true);
+        }
+
         if self.next_step_dur().is_some() {
             return Ok(false);
         }
 
         if let Some((_, data)) = self.buf.pop_front() {
-            let now = self.origin.elapsed().as_nanos() as u64;
-
-            self.next_send_at = std::cmp::max(now, self.next_send_at)
-                + (data.len() as u64 * self.limit_rate);
-
-            self.ws.send(data).await?;
+            self.raw_send(now, data).await?;
 
             Ok(true)
         } else {
@@ -105,6 +148,16 @@ impl SendBuf {
     }
 
     // -- private -- //
+
+    async fn raw_send(&mut self, now: u64, data: Vec<u8>) -> Result<()> {
+        self.next_send_at = std::cmp::max(now, self.next_send_at)
+            + (data.len() as u64 * self.limit_rate);
+
+        self.ws.send(data).await?;
+        self.last_send = now;
+
+        Ok(())
+    }
 
     fn len(&self) -> usize {
         self.buf.iter().map(|(_, d)| d.len()).sum()

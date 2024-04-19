@@ -1,7 +1,6 @@
 //! `feature = "raw_client"` Raw websocket interaction types.
 
-use std::io::{Error, Result};
-use std::sync::Arc;
+use crate::*;
 
 /// Connection info for creating a raw websocket connection.
 pub struct WsRawConnect {
@@ -145,6 +144,58 @@ impl WsRawRecv {
                 }
             }
         }
+    }
+}
+
+/// Process the standard sbd handshake from the client side.
+pub struct Handshake {
+    /// limit_byte_nanos.
+    pub limit_byte_nanos: i32,
+
+    /// limit_idle_millis.
+    pub limit_idle_millis: i32,
+
+    /// bytes sent.
+    pub bytes_sent: usize,
+}
+
+impl Handshake {
+    /// Process the standard sbd handshake from the client side.
+    pub async fn handshake<C: Crypto>(
+        send: &mut WsRawSend,
+        recv: &mut WsRawRecv,
+        crypto: &C,
+    ) -> Result<Self> {
+        let mut limit_byte_nanos = 8000;
+        let mut limit_idle_millis = 10_000;
+        let mut bytes_sent = 0;
+
+        loop {
+            match Msg(recv.recv().await?).parse()? {
+                MsgType::Msg { .. } => {
+                    return Err(Error::other("invalid handshake"))
+                }
+                MsgType::LimitByteNanos(l) => limit_byte_nanos = l,
+                MsgType::LimitIdleMillis(l) => limit_idle_millis = l,
+                MsgType::AuthReq(nonce) => {
+                    let sig = crypto.sign(nonce);
+                    let mut auth_res = Vec::with_capacity(32 + 64);
+                    auth_res.extend_from_slice(CMD_FLAG);
+                    auth_res.extend_from_slice(b"ares");
+                    auth_res.extend_from_slice(&sig);
+                    send.send(auth_res).await?;
+                    bytes_sent += 32 + 64;
+                }
+                MsgType::Ready => break,
+                MsgType::Unknown => (),
+            }
+        }
+
+        Ok(Self {
+            limit_byte_nanos,
+            limit_idle_millis,
+            bytes_sent,
+        })
     }
 }
 

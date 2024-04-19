@@ -153,7 +153,11 @@ async fn check_accept_connection(
         let tcp = MaybeTlsStream::Tcp(tcp);
 
         let (ws, pub_key, ip) =
-            ws::WebSocket::upgrade(config.clone(), tcp).await.unwrap();
+            match ws::WebSocket::upgrade(config.clone(), tcp).await {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+
         let ws = Arc::new(ws);
 
         if let Some(ip) = ip {
@@ -175,7 +179,7 @@ async fn check_accept_connection(
 
         if let Some(cslot) = weak_cslot.upgrade() {
             cslot
-                .insert(calc_ip, pub_key, ws, config.limit_ip_byte_nanos)
+                .insert(calc_ip, pub_key, ws, config.limit_ip_byte_nanos())
                 .await;
         }
     })
