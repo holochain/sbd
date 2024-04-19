@@ -182,20 +182,24 @@ impl CSlot {
 
     pub async fn insert(
         &self,
+        config: &Config,
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
         ws: Arc<ws::WebSocket<MaybeTlsStream>>,
-        limit_ip_byte_nanos: i32,
     ) {
         let rate_send_list = self.insert_and_get_rate_send_list(ip, pk, ws);
 
         if let Some(rate_send_list) = rate_send_list {
-            let mut rate =
-                limit_ip_byte_nanos as u64 * rate_send_list.len() as u64;
-            if rate > i32::MAX as u64 {
-                rate = i32::MAX as u64;
-            }
-            let rate = rate as i32;
+            let rate = if config.disable_rate_limiting {
+                1
+            } else {
+                let mut rate = config.limit_ip_byte_nanos() as u64
+                    * rate_send_list.len() as u64;
+                if rate > i32::MAX as u64 {
+                    rate = i32::MAX as u64;
+                }
+                rate as i32
+            };
 
             for (uniq, index, weak_ws) in rate_send_list {
                 if let Some(ws) = weak_ws.upgrade() {

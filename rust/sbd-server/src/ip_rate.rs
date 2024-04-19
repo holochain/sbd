@@ -6,6 +6,7 @@ type Map = HashMap<Arc<std::net::Ipv6Addr>, u64>;
 pub struct IpRate {
     origin: tokio::time::Instant,
     map: Arc<Mutex<Map>>,
+    disabled: bool,
     limit: u64,
     burst: u64,
     ip_deny: crate::ip_deny::IpDeny,
@@ -17,6 +18,7 @@ impl IpRate {
         Self {
             origin: tokio::time::Instant::now(),
             map: Arc::new(Mutex::new(HashMap::new())),
+            disabled: config.disable_rate_limiting,
             limit: config.limit_ip_byte_nanos() as u64,
             burst: config.limit_ip_byte_burst as u64
                 * config.limit_ip_byte_nanos() as u64,
@@ -55,6 +57,10 @@ impl IpRate {
         ip: &Arc<std::net::Ipv6Addr>,
         bytes: usize,
     ) -> bool {
+        if self.disabled {
+            return true;
+        }
+
         // multiply by our rate allowed per byte
         let rate_add = bytes as u64 * self.limit;
 
@@ -95,6 +101,7 @@ mod tests {
         IpRate {
             origin: tokio::time::Instant::now(),
             map: Arc::new(Mutex::new(HashMap::new())),
+            disabled: false,
             limit,
             burst,
             ip_deny: crate::ip_deny::IpDeny::new(Arc::new(

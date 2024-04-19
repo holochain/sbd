@@ -41,6 +41,11 @@ impl SendBuf {
         this
     }
 
+    /// Close the connection.
+    pub async fn close(&mut self) {
+        self.ws.close().await;
+    }
+
     /// We received a new rate limit from the server, update our records.
     pub fn new_rate_limit(&mut self, limit: u64) {
         if limit < self.limit_rate {

@@ -84,6 +84,11 @@ pub struct Config {
     #[arg(long, default_value_t = DEF_LIMIT_CLIENTS)]
     pub limit_clients: i32,
 
+    /// If set, rate-limiting will be disabled on the server,
+    /// and clients will be informed they have an 8gbps rate limit.
+    #[arg(long)]
+    pub disable_rate_limiting: bool,
+
     /// Rate limit connections to this kilobits per second.
     /// The default value of 1000 obviously limits connections to 1 mbps.
     /// If the default of 32768 connections were all sending this amount
@@ -123,6 +128,7 @@ impl Default for Config {
             back_open: Vec::new(),
             bind_prometheus: None,
             limit_clients: DEF_LIMIT_CLIENTS,
+            disable_rate_limiting: false,
             limit_ip_kbps: DEF_LIMIT_IP_KBPS,
             limit_ip_byte_burst: DEF_LIMIT_IP_BYTE_BURST,
             limit_idle_millis: DEF_LIMIT_IDLE_MILLIS,

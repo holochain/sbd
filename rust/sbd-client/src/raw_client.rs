@@ -117,6 +117,12 @@ impl WsRawSend {
         self.send.flush().await.map_err(Error::other)?;
         Ok(())
     }
+
+    /// Close the connection.
+    pub async fn close(&mut self) {
+        use futures::sink::SinkExt;
+        let _ = self.send.close().await;
+    }
 }
 
 /// The receive half of the websocket connection.

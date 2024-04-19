@@ -178,9 +178,7 @@ async fn check_accept_connection(
         }
 
         if let Some(cslot) = weak_cslot.upgrade() {
-            cslot
-                .insert(calc_ip, pub_key, ws, config.limit_ip_byte_nanos())
-                .await;
+            cslot.insert(&config, calc_ip, pub_key, ws).await;
         }
     })
     .await;

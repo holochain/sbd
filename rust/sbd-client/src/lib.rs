@@ -270,7 +270,7 @@ impl SbdClient {
                 }
             }
 
-            // TODO - shutdown
+            send_buf2.lock().await.close().await;
         });
 
         let send_buf2 = send_buf.clone();
@@ -291,7 +291,7 @@ impl SbdClient {
                 }
             }
 
-            // TODO - shutdown
+            send_buf2.lock().await.close().await;
         });
 
         let this = Self {
@@ -306,6 +306,11 @@ impl SbdClient {
             PubKey(*crypto.pub_key()),
             MsgRecv(recv_recv),
         ))
+    }
+
+    /// Close the connection.
+    pub async fn close(&self) {
+        self.send_buf.lock().await.close().await;
     }
 
     /// Send a message to a peer.
