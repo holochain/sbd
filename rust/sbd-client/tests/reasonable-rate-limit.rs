@@ -37,6 +37,9 @@ async fn reasonable_rate_limit() {
     let (mut c1, _, p1, mut r1) = get_client(server.bind_addrs()).await;
     let (mut c2, _, p2, mut r2) = get_client(server.bind_addrs()).await;
 
+    //warmup
+    run(2, &mut c1, &p1, &mut r1, &mut c2, &p2, &mut r2).await;
+
     let (rate1, rate2) =
         run(10, &mut c1, &p1, &mut r1, &mut c2, &p2, &mut r2).await;
 
