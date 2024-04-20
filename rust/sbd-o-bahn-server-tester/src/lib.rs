@@ -58,14 +58,14 @@ impl Server {
             tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
 
         if let Some(line) = stdout.next_line().await? {
-            if line != "CMD:READY" {
+            if line != "CMD/READY" {
                 panic!("unexpected: {line}");
             }
         } else {
             panic!("no stdout");
         }
 
-        println!("GOT CMD:READY");
+        println!("GOT CMD/READY");
 
         Ok(Self {
             _child: child,
@@ -76,13 +76,12 @@ impl Server {
 
     pub async fn start(&mut self) -> Vec<String> {
         use tokio::io::AsyncWriteExt;
-        self.stdin.write_all(b"CMD:START\n").await.unwrap();
+        self.stdin.write_all(b"CMD/START\n").await.unwrap();
         self.stdin.flush().await.unwrap();
         let line = self.stdout.next_line().await.unwrap().unwrap();
-        if !line.starts_with("CMD:START:") {
+        if !line.starts_with("CMD/START/") {
             panic!("unexpected: {line}");
         }
-        let line = line.into_bytes();
-        serde_json::from_slice(&line[10..]).unwrap()
+        line.split('/').skip(2).map(|s| s.to_string()).collect()
     }
 }

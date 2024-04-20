@@ -5,5 +5,4 @@ edition = "2021"
 
 [dependencies]
 sbd-client = { workspace = true }
-serde_json = "1.0.116"
-tokio = { version = "1.37.0", features = [ "full" ] }
+tokio = { workspace = true, features = [ "full" ] }

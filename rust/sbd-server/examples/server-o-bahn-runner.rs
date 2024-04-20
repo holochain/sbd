@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    println!("CMD:READY");
+    println!("CMD/READY");
 
     let mut lines = tokio::io::AsyncBufReadExt::lines(
         tokio::io::BufReader::new(tokio::io::stdin()),
@@ -12,7 +12,7 @@ async fn main() {
 
     while let Ok(Some(line)) = lines.next_line().await {
         match line.as_str() {
-            "CMD:START" => {
+            "CMD/START" => {
                 drop(server);
                 let mut config = sbd_server::Config::default();
                 config.bind.push("127.0.0.1:0".to_string());
@@ -20,13 +20,11 @@ async fn main() {
                 server = Some(
                     sbd_server::SbdServer::new(Arc::new(config)).await.unwrap(),
                 );
-                println!(
-                    "CMD:START:{}",
-                    serde_json::to_string(
-                        server.as_ref().unwrap().bind_addrs()
-                    )
-                    .unwrap()
-                );
+                let mut out = "CMD/START".to_string();
+                for addr in server.as_ref().unwrap().bind_addrs() {
+                    out.push_str(&format!("/{addr}"));
+                }
+                println!("{out}");
             }
             oth => panic!("error, unexpected: {oth}"),
         }

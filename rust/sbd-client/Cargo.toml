@@ -4,26 +4,26 @@ version = "0.0.1-alpha"
 edition = "2021"
 
 [dependencies]
-base64 = "0.22.0"
-futures = "0.3.30"
-rustls = "0.22.3"
-rustls-native-certs = "0.7.0"
-tokio = { version = "1.37.0", default-features = false, features = [ "io-util", "net", "sync", "time", "rt" ] }
-tokio-rustls = "0.25.0"
-tokio-tungstenite = { version = "0.21.0", default-features = false, features = [ "connect", "__rustls-tls" ] }
+base64 = { workspace = true }
+futures = { workspace = true }
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+tokio = { workspace = true, default-features = false, features = [ "io-util", "net", "sync", "time", "rt" ] }
+tokio-rustls = { workspace = true }
+tokio-tungstenite = { workspace = true, default-features = false, features = [ "connect", "__rustls-tls" ] }
 
 
 # optional
-ed25519-dalek = { version = "2.1.1", features = [ "rand_core" ], optional = true }
-rand = { version = "0.8.5", optional = true }
+ed25519-dalek = { workspace = true, features = [ "rand_core" ], optional = true }
+rand = { workspace = true, optional = true }
 
 [target.'cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))'.dependencies]
-webpki-roots = "0.26.1"
+webpki-roots = { workspace = true }
 
 [dev-dependencies]
-escargot = { version = "0.5.10", features = [ "print" ] }
-hex = "0.4.3"
-tokio = { version = "1.37.0", features = [ "full" ] }
+escargot = { workspace = true, features = [ "print" ] }
+hex = { workspace = true }
+tokio = { workspace = true, features = [ "full" ] }
 sbd-server = { workspace = true }
 
 [features]

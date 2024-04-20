@@ -4,6 +4,6 @@ version = "0.0.1-alpha"
 edition = "2021"
 
 [dependencies]
-hex = "0.4.3"
+hex = { workspace = true }
 sbd-server = { workspace = true }
-tokio = { version = "1.37.0", features = [ "full" ] }
+tokio = { workspace = true, features = [ "full" ] }
