@@ -119,11 +119,14 @@ impl CSlot {
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
         ws: Arc<ws::WebSocket<MaybeTlsStream>>,
-    ) -> Option<Vec<(u64, usize, Weak<ws::WebSocket<MaybeTlsStream>>)>> {
+    ) -> std::result::Result<
+        Vec<(u64, usize, Weak<ws::WebSocket<MaybeTlsStream>>)>,
+        Arc<ws::WebSocket<MaybeTlsStream>>,
+    > {
         let mut lock = self.0.lock().unwrap();
 
         if lock.slab.len() >= lock.max_count {
-            return None;
+            return Err(ws);
         }
 
         let weak_ws = Arc::downgrade(&ws);
@@ -177,7 +180,7 @@ impl CSlot {
             pk,
         });
 
-        Some(rate_send_list)
+        Ok(rate_send_list)
     }
 
     pub async fn insert(
@@ -189,28 +192,34 @@ impl CSlot {
     ) {
         let rate_send_list = self.insert_and_get_rate_send_list(ip, pk, ws);
 
-        if let Some(rate_send_list) = rate_send_list {
-            let rate = if config.disable_rate_limiting {
-                1
-            } else {
-                let mut rate = config.limit_ip_byte_nanos() as u64
-                    * rate_send_list.len() as u64;
-                if rate > i32::MAX as u64 {
-                    rate = i32::MAX as u64;
-                }
-                rate as i32
-            };
+        match rate_send_list {
+            Ok(rate_send_list) => {
+                let rate = if config.disable_rate_limiting {
+                    1
+                } else {
+                    let mut rate = config.limit_ip_byte_nanos() as u64
+                        * rate_send_list.len() as u64;
+                    if rate > i32::MAX as u64 {
+                        rate = i32::MAX as u64;
+                    }
+                    rate as i32
+                };
 
-            for (uniq, index, weak_ws) in rate_send_list {
-                if let Some(ws) = weak_ws.upgrade() {
-                    if ws
-                        .send(cmd::SbdCmd::limit_byte_nanos(rate))
-                        .await
-                        .is_err()
-                    {
-                        self.remove(uniq, index);
+                for (uniq, index, weak_ws) in rate_send_list {
+                    if let Some(ws) = weak_ws.upgrade() {
+                        if ws
+                            .send(cmd::SbdCmd::limit_byte_nanos(rate))
+                            .await
+                            .is_err()
+                        {
+                            self.remove(uniq, index);
+                        }
                     }
                 }
+            }
+            Err(ws) => {
+                ws.close().await;
+                drop(ws);
             }
         }
     }
