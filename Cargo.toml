@@ -3,6 +3,7 @@ members = [
   "rust/sbd-bench",
   "rust/sbd-client",
   "rust/sbd-o-bahn-server-tester",
+  "rust/sbd-o-bahn-client-tester",
   "rust/sbd-server",
 ]
 resolver = "2"

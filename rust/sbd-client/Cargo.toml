@@ -21,6 +21,8 @@ rand = { version = "0.8.5", optional = true }
 webpki-roots = "0.26.1"
 
 [dev-dependencies]
+escargot = { version = "0.5.10", features = [ "print" ] }
+hex = "0.4.3"
 tokio = { version = "1.37.0", features = [ "full" ] }
 sbd-server = { workspace = true }
 

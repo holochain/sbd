@@ -662,6 +662,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "http"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1269,7 +1275,9 @@ version = "0.0.1-alpha"
 dependencies = [
  "base64 0.22.0",
  "ed25519-dalek",
+ "escargot",
  "futures",
+ "hex",
  "rand",
  "rustls",
  "rustls-native-certs",
@@ -1278,6 +1286,15 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "webpki-roots",
+]
+
+[[package]]
+name = "sbd-o-bahn-client-tester"
+version = "0.0.1-alpha"
+dependencies = [
+ "hex",
+ "sbd-server",
+ "tokio",
 ]
 
 [[package]]
