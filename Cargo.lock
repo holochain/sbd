@@ -1286,10 +1286,13 @@ dependencies = [
  "hyper-util",
  "rand",
  "rcgen",
+ "rustls",
+ "rustls-pemfile",
  "sbd-client",
  "slab",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite",
 ]
 

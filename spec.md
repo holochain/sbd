@@ -11,11 +11,11 @@ The SBD protocol is built upon websockets.
 
 #### 1.1.1. Message and Frame Size
 
-The maximum SBD message size (including 32 byte header) is 16000 bytes.
+The maximum SBD message size (including 32 byte header) is 20000 bytes.
 
-SBD clients and servers MAY set the max message size in the websocket library to 16000 to help enforce this.
+SBD clients and servers MAY set the max message size in the websocket library to 20000 to help enforce this.
 
-The maximum frame size MUST be set larger than 16000 so that sbd messages always fit in a single websocket frame.
+The maximum frame size MUST be set larger than 20000 so that sbd messages always fit in a single websocket frame.
 
 ## 2. Cryptography
 

@@ -10,8 +10,11 @@ bytes = { workspace = true }
 clap = { workspace = true, features = [ "color", "derive", "wrap_help" ] }
 ed25519-dalek = { workspace = true, default-features = false }
 rand = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 slab = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
+tokio-rustls = { workspace = true }
 
 # feature tungstenite
 futures = { workspace = true, optional = true }

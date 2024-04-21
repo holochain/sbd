@@ -33,6 +33,7 @@ rand = "0.8.5"
 rcgen = "0.13.1"
 rustls = "0.22.4"
 rustls-native-certs = "0.7.0"
+rustls-pemfile = "2.1.2"
 slab = "0.4.9"
 tempfile = "3.10.1"
 tokio = { version = "1.37.0", default-features = false }

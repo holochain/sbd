@@ -5,7 +5,7 @@ use std::io::{Error, Result};
 use std::sync::Arc;
 
 /// defined by the sbd spec
-const MAX_MSG_SIZE: usize = 16000;
+const MAX_MSG_SIZE: usize = 20_000;
 
 #[cfg(feature = "raw_client")]
 pub mod raw_client;

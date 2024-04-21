@@ -28,7 +28,7 @@ impl WsRawConnect {
             full_url,
             max_message_size,
             allow_plain_text,
-            ..
+            danger_disable_certificate_check,
         } = self;
 
         let scheme_ws = full_url.starts_with("ws://");
@@ -62,7 +62,7 @@ impl WsRawConnect {
         let maybe_tls = if scheme_ws {
             tokio_tungstenite::MaybeTlsStream::Plain(tcp)
         } else {
-            let tls = priv_system_tls();
+            let tls = priv_system_tls(danger_disable_certificate_check);
             let name = host
                 .try_into()
                 .unwrap_or_else(|_| "sbd".try_into().unwrap());
@@ -205,7 +205,9 @@ impl Handshake {
     }
 }
 
-fn priv_system_tls() -> Arc<rustls::ClientConfig> {
+fn priv_system_tls(
+    danger_disable_certificate_check: bool,
+) -> Arc<rustls::ClientConfig> {
     let mut roots = rustls::RootCertStore::empty();
 
     #[cfg(not(any(
@@ -236,9 +238,66 @@ fn priv_system_tls() -> Arc<rustls::ClientConfig> {
         roots.add(cert).expect("faild to add cert to root");
     }
 
-    Arc::new(
-        rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth(),
-    )
+    if danger_disable_certificate_check {
+        let v = rustls::client::WebPkiServerVerifier::builder(Arc::new(roots))
+            .build()
+            .unwrap();
+
+        Arc::new(
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(V(v)))
+                .with_no_client_auth(),
+        )
+    } else {
+        Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth(),
+        )
+    }
+}
+
+#[derive(Debug)]
+struct V(Arc<rustls::client::WebPkiServerVerifier>);
+
+impl rustls::client::danger::ServerCertVerifier for V {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<
+        rustls::client::danger::ServerCertVerified,
+        rustls::Error,
+    > {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<
+        rustls::client::danger::HandshakeSignatureValid,
+        rustls::Error,
+    > {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<
+        rustls::client::danger::HandshakeSignatureValid,
+        rustls::Error,
+    > {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.supported_verify_schemes()
+    }
 }

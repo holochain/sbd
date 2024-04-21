@@ -2,7 +2,7 @@
 #![deny(missing_docs)]
 
 /// defined by the sbd spec
-const MAX_MSG_BYTES: i32 = 16000;
+const MAX_MSG_BYTES: i32 = 20_000;
 
 use std::io::{Error, Result};
 use std::sync::Arc;
@@ -149,11 +149,19 @@ async fn check_accept_connection(
             }
         }
 
-        // TODO TLS upgrade
-        let tcp = MaybeTlsStream::Tcp(tcp);
+        let socket = if let (Some(cert), Some(pk)) =
+            (&config.cert_pem_file, &config.priv_key_pem_file)
+        {
+            match MaybeTlsStream::tls(cert, pk, tcp).await {
+                Err(_) => return,
+                Ok(tls) => tls,
+            }
+        } else {
+            MaybeTlsStream::Tcp(tcp)
+        };
 
         let (ws, pub_key, ip) =
-            match ws::WebSocket::upgrade(config.clone(), tcp).await {
+            match ws::WebSocket::upgrade(config.clone(), socket).await {
                 Ok(r) => r,
                 Err(_) => return,
             };
@@ -260,5 +268,83 @@ impl SbdServer {
     /// Get the list of addresses bound locally.
     pub fn bind_addrs(&self) -> &[std::net::SocketAddr] {
         self.bind_addrs.as_slice()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_sanity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp_dir = tmp.path().to_owned();
+        let rcgen::CertifiedKey { cert, key_pair } =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+                .unwrap();
+        let mut cert_path = tmp_dir.clone();
+        cert_path.push("cert.pem");
+        tokio::fs::write(&cert_path, cert.pem()).await.unwrap();
+        let mut key_path = tmp_dir.clone();
+        key_path.push("key.pem");
+        tokio::fs::write(&key_path, key_pair.serialize_pem())
+            .await
+            .unwrap();
+
+        let mut config = Config::default();
+        config.cert_pem_file = Some(cert_path);
+        config.priv_key_pem_file = Some(key_path);
+        config.bind.push("127.0.0.1:0".into());
+        println!("{config:?}");
+
+        let server = SbdServer::new(Arc::new(config)).await.unwrap();
+
+        let addr = server.bind_addrs()[0].clone();
+
+        println!("addr: {addr:?}");
+
+        let (client1, url1, pk1, mut rcv1) =
+            sbd_client::SbdClient::connect_config(
+                &format!("wss://{addr}"),
+                &sbd_client::DefaultCrypto::default(),
+                sbd_client::SbdClientConfig {
+                    allow_plain_text: true,
+                    danger_disable_certificate_check: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        println!("client url1: {url1}");
+
+        let (client2, url2, pk2, mut rcv2) =
+            sbd_client::SbdClient::connect_config(
+                &format!("wss://{addr}"),
+                &sbd_client::DefaultCrypto::default(),
+                sbd_client::SbdClientConfig {
+                    allow_plain_text: true,
+                    danger_disable_certificate_check: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        println!("client url2: {url2}");
+
+        client1.send(&pk2, b"hello").await.unwrap();
+
+        let res_data = rcv2.recv().await.unwrap();
+
+        assert_eq!(&pk1.0, res_data.pub_key_ref());
+        assert_eq!(&b"hello"[..], res_data.message());
+
+        client2.send(&pk1, b"world").await.unwrap();
+
+        let res_data = rcv1.recv().await.unwrap();
+
+        assert_eq!(&pk2.0, res_data.pub_key_ref());
+        assert_eq!(&b"world"[..], res_data.message());
     }
 }
