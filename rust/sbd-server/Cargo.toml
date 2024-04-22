@@ -44,3 +44,5 @@ fastwebsockets = [
   "dep:hyper-util",
   "dep:hyper",
 ]
+
+unstable = []

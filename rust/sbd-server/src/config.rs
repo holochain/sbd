@@ -1,4 +1,6 @@
+#[cfg(feature = "unstable")]
 const DEF_IP_DENY_DIR: &str = ".";
+#[cfg(feature = "unstable")]
 const DEF_IP_DENY_S: i32 = 600;
 const DEF_LIMIT_CLIENTS: i32 = 32768;
 const DEF_LIMIT_IP_KBPS: i32 = 1000;
@@ -31,6 +33,7 @@ pub struct Config {
     #[arg(long, verbatim_doc_comment)]
     pub bind: Vec<String>,
 
+    #[cfg(feature = "unstable")]
     /// Watch this directory, and reload TLS certificates 10s after any
     /// files change within it. Must be an exact match to the parent directory
     /// of both `--cert-pem-file` and `--priv-key-pem-file`.
@@ -42,23 +45,27 @@ pub struct Config {
     #[arg(long)]
     pub trusted_ip_header: Option<String>,
 
+    #[cfg(feature = "unstable")]
     /// The directory in which to store the blocked ip addresses.
     /// Note v4 addresses will be mapped to v6 addresses per
     /// <https://datatracker.ietf.org/doc/html/rfc4291#section-2.5.5.2>.
     #[arg(long, default_value = DEF_IP_DENY_DIR)]
     pub ip_deny_dir: std::path::PathBuf,
 
+    #[cfg(feature = "unstable")]
     /// How long to block ip addresses in seconds. Set to zero to block
     /// forever (or until the file is manually deleted).
     #[arg(long, default_value_t = DEF_IP_DENY_S)]
     pub ip_deny_s: i32,
 
+    #[cfg(feature = "unstable")]
     /// Bind to this backchannel interface and port.
     /// Can be specified more than once.
     /// Note, this should be a local only or virtual private interface.
     #[arg(long)]
     pub back_bind: Vec<String>,
 
+    #[cfg(feature = "unstable")]
     /// Allow incoming backchannel connections only
     /// from the following explicit addresses. Note, this is expecting direct
     /// connections, not through a proxy, so only the raw TCP address will
@@ -68,6 +75,7 @@ pub struct Config {
     #[arg(long)]
     pub back_allow_ip: Vec<String>,
 
+    #[cfg(feature = "unstable")]
     /// Try to establish outgoing backchannel connections
     /// to the following ip+port addresses.
     /// Can be specified more than once.
@@ -75,6 +83,7 @@ pub struct Config {
     #[arg(long)]
     pub back_open: Vec<String>,
 
+    #[cfg(feature = "unstable")]
     /// Bind to this interface and port to provide prometheus metrics.
     /// Note, this should be a local only or virtual private interface.
     #[arg(long)]
@@ -119,13 +128,20 @@ impl Default for Config {
             cert_pem_file: None,
             priv_key_pem_file: None,
             bind: Vec::new(),
+            #[cfg(feature = "unstable")]
             watch_reload_tls_dir: None,
             trusted_ip_header: None,
+            #[cfg(feature = "unstable")]
             ip_deny_dir: std::path::PathBuf::from(DEF_IP_DENY_DIR),
+            #[cfg(feature = "unstable")]
             ip_deny_s: DEF_IP_DENY_S,
+            #[cfg(feature = "unstable")]
             back_bind: Vec::new(),
+            #[cfg(feature = "unstable")]
             back_allow_ip: Vec::new(),
+            #[cfg(feature = "unstable")]
             back_open: Vec::new(),
+            #[cfg(feature = "unstable")]
             bind_prometheus: None,
             limit_clients: DEF_LIMIT_CLIENTS,
             disable_rate_limiting: false,

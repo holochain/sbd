@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 pub struct SendBuf {
     pub ws: raw_client::WsRawSend,
-    pub buf: VecDeque<(PubKey, Vec<u8>)>,
+    pub buf: VecDeque<Vec<u8>>,
     pub out_buffer_size: usize,
     pub origin: tokio::time::Instant,
     pub limit_rate: u64,
@@ -103,8 +103,8 @@ impl SendBuf {
             return Ok(false);
         }
 
-        if let Some((_, data)) = self.buf.pop_front() {
-            self.raw_send(now, data).await?;
+        if let Some(buf) = self.buf.pop_front() {
+            self.raw_send(now, buf).await?;
 
             Ok(true)
         } else {
@@ -116,7 +116,11 @@ impl SendBuf {
     /// Then queue up data to be sent out.
     /// Note, you'll need to explicitly call `write_next_queued()` or
     /// make additional sends in order to get this queued data actually sent.
-    pub async fn send(&mut self, pk: &PubKey, mut data: &[u8]) -> Result<()> {
+    pub async fn send(&mut self, pk: &PubKey, data: &[u8]) -> Result<()> {
+        if data.len() > MAX_MSG_SIZE - 32 {
+            return Err(Error::other("message too large"));
+        }
+
         while !self.space_free() {
             if let Some(dur) = self.next_step_dur() {
                 tokio::time::sleep(dur).await;
@@ -124,30 +128,10 @@ impl SendBuf {
             self.write_next_queued().await?;
         }
 
-        self.check_set_prebuffer();
-
-        // first try to put into existing blocks
-        for (qpk, qdata) in self.buf.iter_mut() {
-            if qpk == pk && qdata.len() < MAX_MSG_SIZE {
-                let amt = std::cmp::min(data.len(), MAX_MSG_SIZE - qdata.len());
-                qdata.extend_from_slice(&data[..amt]);
-                data = &data[amt..];
-                if data.is_empty() {
-                    return Ok(());
-                }
-            }
-        }
-
-        // next, fill out new entries
-        while !data.is_empty() {
-            let mut init = Vec::with_capacity(MAX_MSG_SIZE);
-            init.extend_from_slice(&pk.0[..]);
-
-            let amt = std::cmp::min(data.len(), MAX_MSG_SIZE - init.len());
-            init.extend_from_slice(&data[..amt]);
-            data = &data[amt..];
-            self.buf.push_back((*pk, init));
-        }
+        let mut buf = Vec::with_capacity(32 + data.len());
+        buf.extend_from_slice(&pk.0[..]);
+        buf.extend_from_slice(data);
+        self.buf.push_back(buf);
 
         Ok(())
     }
@@ -165,17 +149,7 @@ impl SendBuf {
     }
 
     fn len(&self) -> usize {
-        self.buf.iter().map(|(_, d)| d.len()).sum()
-    }
-
-    /// If we have an empty out buffer, set some rate-limit as a hack
-    /// for waiting a little bit to see if more sends come in and can
-    /// be aggregated
-    fn check_set_prebuffer(&mut self) {
-        if self.buf.is_empty() {
-            let hack = self.origin.elapsed().as_nanos() as u64 + 10_000_000; // 10 millis in nanos
-            self.next_send_at = std::cmp::max(hack, self.next_send_at)
-        }
+        self.buf.iter().map(|b| b.len()).sum()
     }
 
     /// Returns `true` if our total buffer size < out_buffer_size

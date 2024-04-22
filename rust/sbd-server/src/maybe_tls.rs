@@ -1,29 +1,47 @@
 //! taken and altered from tokio_tungstenite
 
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-/// A stream that might be protected with TLS.
-#[non_exhaustive]
-#[derive(Debug)]
-pub enum MaybeTlsStream {
-    /// Tcp.
-    Tcp(tokio::net::TcpStream),
-
-    /// Tls.
-    Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
+pub struct TlsConfig {
+    cert: std::path::PathBuf,
+    pk: std::path::PathBuf,
+    config: Arc<Mutex<Arc<rustls::server::ServerConfig>>>,
 }
 
-impl MaybeTlsStream {
-    pub async fn tls(
+impl TlsConfig {
+    pub async fn new(
         cert: &std::path::Path,
         pk: &std::path::Path,
-        tcp: tokio::net::TcpStream,
     ) -> std::io::Result<Self> {
+        let cert = cert.to_owned();
+        let pk = pk.to_owned();
+        let config = Self::load(&cert, &pk).await?;
+        Ok(Self {
+            cert,
+            pk,
+            config: Arc::new(Mutex::new(config)),
+        })
+    }
+
+    pub fn config(&self) -> Arc<rustls::server::ServerConfig> {
+        self.config.lock().unwrap().clone()
+    }
+
+    #[allow(dead_code)] // watch reload tls
+    pub async fn reload(&self) -> std::io::Result<()> {
+        let new_config = Self::load(&self.cert, &self.pk).await?;
+        *self.config.lock().unwrap() = new_config;
+        Ok(())
+    }
+
+    async fn load(
+        cert: &std::path::Path,
+        pk: &std::path::Path,
+    ) -> std::io::Result<Arc<rustls::server::ServerConfig>> {
         use rustls_pemfile::Item::*;
 
         let cert = tokio::fs::read(cert).await?;
@@ -46,14 +64,34 @@ impl MaybeTlsStream {
             _ => return Err(std::io::Error::other("error reading priv key")),
         };
 
-        let c = std::sync::Arc::new(
+        Ok(std::sync::Arc::new(
             rustls::server::ServerConfig::builder()
                 .with_no_client_auth()
                 .with_single_cert(vec![cert], pk)
                 .map_err(std::io::Error::other)?,
-        );
+        ))
+    }
+}
 
-        let tls = tokio_rustls::TlsAcceptor::from(c).accept(tcp).await?;
+/// A stream that might be protected with TLS.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum MaybeTlsStream {
+    /// Tcp.
+    Tcp(tokio::net::TcpStream),
+
+    /// Tls.
+    Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
+}
+
+impl MaybeTlsStream {
+    pub async fn tls(
+        tls_config: &TlsConfig,
+        tcp: tokio::net::TcpStream,
+    ) -> std::io::Result<Self> {
+        let config = tls_config.config();
+
+        let tls = tokio_rustls::TlsAcceptor::from(config).accept(tcp).await?;
 
         Ok(Self::Tls(tls))
     }

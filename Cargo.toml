@@ -8,6 +8,9 @@ members = [
 ]
 resolver = "2"
 
+[profile.release]
+panic = "abort"
+
 [workspace.dependencies]
 # workspace member deps
 sbd-bench = { version = "0.0.1-alpha", path = "rust/sbd-bench" }

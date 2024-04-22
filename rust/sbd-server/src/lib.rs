@@ -118,6 +118,7 @@ impl Drop for SbdServer {
 async fn check_accept_connection(
     _connect_permit: tokio::sync::OwnedSemaphorePermit,
     config: Arc<Config>,
+    tls_config: Option<Arc<maybe_tls::TlsConfig>>,
     ip_rate: Arc<ip_rate::IpRate>,
     tcp: tokio::net::TcpStream,
     addr: std::net::SocketAddr,
@@ -149,10 +150,8 @@ async fn check_accept_connection(
             }
         }
 
-        let socket = if let (Some(cert), Some(pk)) =
-            (&config.cert_pem_file, &config.priv_key_pem_file)
-        {
-            match MaybeTlsStream::tls(cert, pk, tcp).await {
+        let socket = if let Some(tls_config) = &tls_config {
+            match MaybeTlsStream::tls(tls_config, tcp).await {
                 Err(_) => return,
                 Ok(tls) => tls,
             }
@@ -195,6 +194,14 @@ async fn check_accept_connection(
 impl SbdServer {
     /// Construct a new running sbd server with the provided config.
     pub async fn new(config: Arc<Config>) -> Result<Self> {
+        let tls_config = if let (Some(cert), Some(pk)) =
+            (&config.cert_pem_file, &config.priv_key_pem_file)
+        {
+            Some(Arc::new(maybe_tls::TlsConfig::new(cert, pk).await?))
+        } else {
+            None
+        };
+
         let mut task_list = Vec::new();
         let mut bind_addrs = Vec::new();
 
@@ -228,6 +235,7 @@ impl SbdServer {
             let tcp = tokio::net::TcpListener::bind(a).await?;
             bind_addrs.push(tcp.local_addr()?);
 
+            let tls_config = tls_config.clone();
             let connect_limit = connect_limit.clone();
             let config = config.clone();
             let weak_cslot = weak_cslot.clone();
@@ -248,6 +256,7 @@ impl SbdServer {
                         tokio::task::spawn(check_accept_connection(
                             connect_permit,
                             config.clone(),
+                            tls_config.clone(),
                             ip_rate.clone(),
                             tcp,
                             addr,
