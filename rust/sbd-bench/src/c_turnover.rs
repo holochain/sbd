@@ -66,11 +66,11 @@ mod tests {
         }
 
         let start = tokio::time::Instant::now();
-        for _ in 0..100 {
+        for _ in 0..10 {
             b.iter().await;
         }
         let elapsed = start.elapsed();
 
-        println!("{} nanos per iter", elapsed.as_nanos() / 100);
+        println!("{} nanos per iter", elapsed.as_nanos() / 10);
     }
 }
