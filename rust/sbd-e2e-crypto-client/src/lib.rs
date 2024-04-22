@@ -1,14 +1,17 @@
 //! Sbd end to end encryption client.
-#[deny(missing_docs)]
+#![deny(missing_docs)]
+
 use std::io::Result;
 use std::sync::Mutex;
 
+/// Crypto based on sodoken(libsodium).
 pub struct SodokenCrypto {
     sign_pk: [u8; 32],
     sign_sk: Mutex<sodoken::LockedArray<64>>,
 }
 
 impl SodokenCrypto {
+    /// Construct a new crypto instance.
     pub fn new() -> Result<Self> {
         let mut sign_pk = [0; 32];
         let mut sign_sk = sodoken::LockedArray::new()?;
