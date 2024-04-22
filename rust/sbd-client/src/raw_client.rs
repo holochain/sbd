@@ -184,7 +184,7 @@ impl Handshake {
                 MsgType::LimitByteNanos(l) => limit_byte_nanos = l,
                 MsgType::LimitIdleMillis(l) => limit_idle_millis = l,
                 MsgType::AuthReq(nonce) => {
-                    let sig = crypto.sign(nonce);
+                    let sig = crypto.sign(nonce)?;
                     let mut auth_res = Vec::with_capacity(32 + 64);
                     auth_res.extend_from_slice(CMD_FLAG);
                     auth_res.extend_from_slice(b"ares");
