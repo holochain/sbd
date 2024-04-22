@@ -1,9 +1,0 @@
-[workspace]
-members = [
-  "rust/sbd-client",
-  "rust/sbd-server",
-  "rust/sbd-server-test-suite",
-]
-resolver = "2"
-
-[workspace.dependencies]
