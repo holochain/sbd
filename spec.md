@@ -65,7 +65,7 @@ the first 32 bytes will be altered to represent the peer from which the message 
 
 #### 3.2.3. Flow
 
-- The server MUST send `areq` with a random nonce once for every new opened connection.
+- The server MUST send `areq` with a random nonce once for every newly opened connection.
   The server MAY send any limit messages before or after this `areq`, but it MUST come before the `srdy`.
 - The client MUST respond with a signature over the nonce by the private key associated with the public key
   sent in the url path segment websocket request

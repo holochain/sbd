@@ -82,7 +82,7 @@ enum MsgType<'t> {
 
 /// A message received from a remote.
 /// This is just a single buffer. The first 32 bytes are the public key
-/// of the sender. Any remaining bytes are the message. The buffer
+/// of the sender, or 28 `0`s followed by a 4 byte command. Any remaining bytes are the message. The buffer
 /// contained in this type is guaranteed to be at least 32 bytes long.
 pub struct Msg(pub Vec<u8>);
 
