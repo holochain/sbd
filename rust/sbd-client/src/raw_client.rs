@@ -235,7 +235,7 @@ fn priv_system_tls(
     for cert in rustls_native_certs::load_native_certs()
         .expect("failed to load system tls certs")
     {
-        roots.add(cert).expect("faild to add cert to root");
+        roots.add(cert).expect("failed to add cert to root");
     }
 
     if danger_disable_certificate_check {

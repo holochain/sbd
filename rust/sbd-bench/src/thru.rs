@@ -2,14 +2,14 @@ use super::*;
 
 pub struct ThruBenchmark {
     _server: SbdServer,
-    c1: DefaultCrypto,
-    s1: WsRawSend,
-    r1: WsRawRecv,
-    c2: DefaultCrypto,
-    s2: WsRawSend,
-    r2: WsRawRecv,
-    v1: Option<Vec<u8>>,
-    v2: Option<Vec<u8>>,
+    crypto1: DefaultCrypto,
+    send1: WsRawSend,
+    recv1: WsRawRecv,
+    crypto2: DefaultCrypto,
+    send2: WsRawSend,
+    recv2: WsRawRecv,
+    message1: Option<Vec<u8>>,
+    message2: Option<Vec<u8>>,
 }
 
 impl ThruBenchmark {
@@ -23,66 +23,72 @@ impl ThruBenchmark {
 
         let server = SbdServer::new(config).await.unwrap();
 
-        let c1 = DefaultCrypto::default();
-        let (mut s1, mut r1) = raw_connect(c1.pub_key(), server.bind_addrs())
+        let crypto1 = DefaultCrypto::default();
+        let (mut send1, mut recv1) =
+            raw_connect(crypto1.pub_key(), server.bind_addrs())
+                .await
+                .unwrap();
+
+        let crypto2 = DefaultCrypto::default();
+        let (mut send2, mut recv2) =
+            raw_connect(crypto2.pub_key(), server.bind_addrs())
+                .await
+                .unwrap();
+
+        Handshake::handshake(&mut send1, &mut recv1, &crypto1)
             .await
             .unwrap();
-
-        let c2 = DefaultCrypto::default();
-        let (mut s2, mut r2) = raw_connect(c2.pub_key(), server.bind_addrs())
+        Handshake::handshake(&mut send2, &mut recv2, &crypto2)
             .await
             .unwrap();
-
-        Handshake::handshake(&mut s1, &mut r1, &c1).await.unwrap();
-        Handshake::handshake(&mut s2, &mut r2, &c2).await.unwrap();
 
         Self {
             _server: server,
-            c1,
-            s1,
-            r1,
-            c2,
-            s2,
-            r2,
-            v1: None,
-            v2: None,
+            crypto1,
+            send1,
+            recv1,
+            crypto2,
+            send2,
+            recv2,
+            message1: None,
+            message2: None,
         }
     }
 
     pub async fn iter(&mut self) {
         let Self {
-            c1,
-            s1,
-            r1,
-            c2,
-            s2,
-            r2,
-            v1,
-            v2,
+            crypto1,
+            send1,
+            recv1,
+            crypto2,
+            send2,
+            recv2,
+            message1,
+            message2,
             ..
         } = self;
 
-        let mut b1 = v1.take().unwrap_or_else(|| vec![0xdb; 1000]);
-        let mut b2 = v2.take().unwrap_or_else(|| vec![0xca; 1000]);
+        let mut b1 = message1.take().unwrap_or_else(|| vec![0xdb; 1000]);
+        let mut b2 = message2.take().unwrap_or_else(|| vec![0xca; 1000]);
 
         tokio::join!(
             async {
-                b1[0..32].copy_from_slice(c2.pub_key());
-                s1.send(b1).await.unwrap();
+                b1[0..32].copy_from_slice(crypto2.pub_key());
+                send1.send(b1).await.unwrap();
             },
             async {
-                b2[0..32].copy_from_slice(c1.pub_key());
-                s2.send(b2).await.unwrap();
+                b2[0..32].copy_from_slice(crypto1.pub_key());
+                send2.send(b2).await.unwrap();
             },
             async {
-                let b2 = r1.recv().await.unwrap();
+                let b2 = recv1.recv().await.unwrap();
                 assert_eq!(1000, b2.len());
-                *v2 = Some(b2);
+                *message2 = Some(b2);
             },
             async {
-                let b1 = r2.recv().await.unwrap();
+                let b1 = recv2.recv().await.unwrap();
                 assert_eq!(1000, b1.len());
-                *v1 = Some(b1);
+                *message1 = Some(b1);
             },
         );
     }

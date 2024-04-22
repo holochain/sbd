@@ -33,7 +33,7 @@ Clients will be identified by ed25519 public key. Client sessions will be valida
 
 Clients MUST specify exactly 1 http path item on the websocket connection url.
 This item must be the base64url encoded public key that this client will be identified by.
-This public key MUST be unique to this new connection.
+This public key SHOULD be unique to this new connection.
 
 ### 3.2. Messages
 
@@ -65,7 +65,9 @@ the first 32 bytes will be altered to represent the peer from which the message 
 
 #### 3.2.3. Flow
 
-- The server MUST send `areq` with a random nonce once for every new opened connection.
+- If the server is in an overload state, it MAY drop incoming tcp connections
+  immediately with no response even before doing any TLS handshaking.
+- The server MUST send `areq` with a random nonce once for every newly opened connection.
   The server MAY send any limit messages before or after this `areq`, but it MUST come before the `srdy`.
 - The client MUST respond with a signature over the nonce by the private key associated with the public key
   sent in the url path segment websocket request
