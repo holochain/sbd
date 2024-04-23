@@ -19,6 +19,11 @@ const HDR_SIZE: usize = PK_SIZE;
 /// defined by sbd spec
 const NONCE_SIZE: usize = 32;
 
+const F_LIMIT_BYTE_NANOS: &[u8] = b"lbrt";
+const F_LIMIT_IDLE_MILLIS: &[u8] = b"lidl";
+const F_AUTH_REQ: &[u8] = b"areq";
+const F_READY: &[u8] = b"srdy";
+
 #[cfg(feature = "raw_client")]
 pub mod raw_client;
 #[cfg(not(feature = "raw_client"))]
@@ -125,7 +130,7 @@ impl Msg {
         }
         if &self.0[..28] == CMD_PREFIX {
             match &self.0[28..HDR_SIZE] {
-                b"lbrt" => {
+                F_LIMIT_BYTE_NANOS => {
                     if self.0.len() != HDR_SIZE + 4 {
                         return Err(Error::other("invalid lbrt length"));
                     }
@@ -133,7 +138,7 @@ impl Msg {
                         self.0[PK_SIZE..].try_into().unwrap(),
                     )))
                 }
-                b"lidl" => {
+                F_LIMIT_IDLE_MILLIS => {
                     if self.0.len() != HDR_SIZE + 4 {
                         return Err(Error::other("invalid lidl length"));
                     }
@@ -141,13 +146,13 @@ impl Msg {
                         self.0[HDR_SIZE..].try_into().unwrap(),
                     )))
                 }
-                b"areq" => {
+                F_AUTH_REQ => {
                     if self.0.len() != HDR_SIZE + NONCE_SIZE {
                         return Err(Error::other("invalid areq length"));
                     }
                     Ok(MsgType::AuthReq(&self.0[HDR_SIZE..]))
                 }
-                b"srdy" => Ok(MsgType::Ready),
+                F_READY => Ok(MsgType::Ready),
                 _ => Ok(MsgType::Unknown),
             }
         } else {
