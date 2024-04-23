@@ -35,8 +35,7 @@ impl SendBuf {
 
         let now = this.origin.elapsed().as_nanos() as u64;
 
-        this.next_send_at = std::cmp::max(now, this.next_send_at)
-            + (pre_sent_bytes as u64 * this.limit_rate);
+        this.next_send_at = now + (pre_sent_bytes as u64 * this.limit_rate);
 
         this
     }
