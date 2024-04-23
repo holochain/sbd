@@ -92,7 +92,7 @@ impl SendBuf {
 
         // first check if we need to keepalive
         if now - self.last_send >= self.idle_keepalive_nanos {
-            let mut data = Vec::with_capacity(32);
+            let mut data = Vec::with_capacity(HDR_SIZE);
             data.extend_from_slice(CMD_PREFIX);
             data.extend_from_slice(b"keep");
             self.raw_send(now, data).await?;
@@ -117,7 +117,7 @@ impl SendBuf {
     /// Note, you'll need to explicitly call `write_next_queued()` or
     /// make additional sends in order to get this queued data actually sent.
     pub async fn send(&mut self, pk: &PubKey, data: &[u8]) -> Result<()> {
-        if data.len() > MAX_MSG_SIZE - 32 {
+        if data.len() > MAX_MSG_SIZE - PK_SIZE {
             return Err(Error::other("message too large"));
         }
 
@@ -128,7 +128,7 @@ impl SendBuf {
             self.write_next_queued().await?;
         }
 
-        let mut buf = Vec::with_capacity(32 + data.len());
+        let mut buf = Vec::with_capacity(PK_SIZE + data.len());
         buf.extend_from_slice(&pk.0[..]);
         buf.extend_from_slice(data);
         self.buf.push_back(buf);

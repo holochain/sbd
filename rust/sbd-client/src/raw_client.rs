@@ -185,12 +185,12 @@ impl Handshake {
                 MsgType::LimitIdleMillis(l) => limit_idle_millis = l,
                 MsgType::AuthReq(nonce) => {
                     let sig = crypto.sign(nonce);
-                    let mut auth_res = Vec::with_capacity(32 + 64);
+                    let mut auth_res = Vec::with_capacity(HDR_SIZE + SIG_SIZE);
                     auth_res.extend_from_slice(CMD_PREFIX);
                     auth_res.extend_from_slice(b"ares");
                     auth_res.extend_from_slice(&sig);
                     send.send(auth_res).await?;
-                    bytes_sent += 32 + 64;
+                    bytes_sent += HDR_SIZE + SIG_SIZE;
                 }
                 MsgType::Ready => break,
                 MsgType::Unknown => (),
