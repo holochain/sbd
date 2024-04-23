@@ -5,19 +5,23 @@ const F_LIMIT_BYTE_NANOS: &[u8] = b"lbrt";
 const F_LIMIT_IDLE_MILLIS: &[u8] = b"lidl";
 const F_AUTH_REQ: &[u8] = b"areq";
 const F_AUTH_RES: &[u8] = b"ares";
-//const F_READY: &[u8] = b"srdy";
 
-/// Sbd commands. This enum only includes the types that clients send.
-/// The class contains only methods for generating commands that can
-/// be sent to the client.
+/// Sbd commands.
+/// Enum variants represent only the types that clients can send to the server:
+/// - not-cmd Message(payload)
+/// - `keep` Keepalive
+/// - `ares` AuthRes(signature)
+/// - other-cmd Unknown
+/// Member functions represent only the types that the server can send to the
+/// clients:
+/// - `lbrt` limit_byte_nanos(i32)
+/// - `lidl` limit_idle_millis(i32)
+/// - `areq` auth_req(nonce)
+/// - `srdy` ready()
 pub enum SbdCmd<'c> {
     Message(Payload<'c>),
     Keepalive,
-    //LimitByteNanos(i32),
-    //LimitIdleMillis(i32),
-    //AuthReq([u8; 32]),
     AuthRes([u8; 64]),
-    //Ready,
     Unknown,
 }
 
