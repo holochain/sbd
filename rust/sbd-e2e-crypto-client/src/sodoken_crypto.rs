@@ -8,7 +8,7 @@ pub struct Encryptor {
 
 impl Encryptor {
     /// Initialize a new encryptor.
-    pub fn init(&mut self) -> Result<[u8; 24]> {
+    fn init(&mut self) -> Result<[u8; 24]> {
         let mut header = [0; 24];
         sodoken::secretstream::init_push(
             &mut self.state,
@@ -39,21 +39,29 @@ pub struct Decryptor {
 }
 
 impl Decryptor {
-    /// Initialize a new decryptor.
-    pub fn init(&mut self, header: [u8; 24]) -> Result<()> {
-        sodoken::secretstream::init_pull(
-            &mut self.state,
-            &header,
-            &self.sk.lock(),
-        )?;
-        Ok(())
-    }
-
     /// Decrypt a new message.
-    pub fn decrypt(&mut self, msg: &[u8]) -> Result<Vec<u8>> {
+    pub fn decrypt(&mut self, msg: &[u8]) -> Result<Option<Vec<u8>>> {
         let mut out = vec![0; msg.len() - sodoken::secretstream::ABYTES];
-        sodoken::secretstream::pull(&mut self.state, &mut out, msg, None)?;
-        Ok(out)
+        match sodoken::secretstream::pull(&mut self.state, &mut out, msg, None)
+        {
+            Ok(_) => return Ok(Some(out)),
+            Err(_) => {
+                if msg.len() == 24 {
+                    let mut header = [0; 24];
+                    header.copy_from_slice(msg);
+                    if sodoken::secretstream::init_pull(
+                        &mut self.state,
+                        &header,
+                        &self.sk.lock(),
+                    )
+                    .is_ok()
+                    {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        Err(Error::other("decryption failure"))
     }
 }
 
@@ -91,7 +99,7 @@ impl SodokenCrypto {
     pub fn new_enc(
         &self,
         peer_sign_pk: &[u8; 32],
-    ) -> Result<(Encryptor, Decryptor)> {
+    ) -> Result<(Encryptor, [u8; 24], Decryptor)> {
         let mut peer_enc_pk = [0; 32];
         sodoken::sign::pk_to_curve25519(&mut peer_enc_pk, peer_sign_pk)?;
 
@@ -116,11 +124,16 @@ impl SodokenCrypto {
             )?;
         }
 
+        let mut enc = Encryptor {
+            sk: tx,
+            state: sodoken::secretstream::State::default(),
+        };
+
+        let hdr = enc.init()?;
+
         Ok((
-            Encryptor {
-                sk: tx,
-                state: sodoken::secretstream::State::default(),
-            },
+            enc,
+            hdr,
             Decryptor {
                 sk: rx,
                 state: sodoken::secretstream::State::default(),
