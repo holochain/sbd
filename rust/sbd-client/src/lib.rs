@@ -64,7 +64,7 @@ impl std::fmt::Debug for PubKey {
     }
 }
 
-const CMD_FLAG: &[u8; 28] = &[0; 28];
+const CMD_PREFIX: &[u8; 28] = &[0; 28];
 
 enum MsgType<'t> {
     Msg {
@@ -108,7 +108,7 @@ impl Msg {
         if self.0.len() < 32 {
             return Err(Error::other("invalid message length"));
         }
-        if &self.0[..28] == CMD_FLAG {
+        if &self.0[..28] == CMD_PREFIX {
             match &self.0[28..32] {
                 b"lbrt" => {
                     if self.0.len() != 32 + 4 {

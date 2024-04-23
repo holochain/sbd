@@ -93,7 +93,7 @@ impl SendBuf {
         // first check if we need to keepalive
         if now - self.last_send >= self.idle_keepalive_nanos {
             let mut data = Vec::with_capacity(32);
-            data.extend_from_slice(CMD_FLAG);
+            data.extend_from_slice(CMD_PREFIX);
             data.extend_from_slice(b"keep");
             self.raw_send(now, data).await?;
             return Ok(true);

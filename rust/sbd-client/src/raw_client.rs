@@ -186,7 +186,7 @@ impl Handshake {
                 MsgType::AuthReq(nonce) => {
                     let sig = crypto.sign(nonce);
                     let mut auth_res = Vec::with_capacity(32 + 64);
-                    auth_res.extend_from_slice(CMD_FLAG);
+                    auth_res.extend_from_slice(CMD_PREFIX);
                     auth_res.extend_from_slice(b"ares");
                     auth_res.extend_from_slice(&sig);
                     send.send(auth_res).await?;
