@@ -112,6 +112,8 @@ A server MAY track rate limiting by some metric other than individual connection
 Then, if additional connections are established from the same other metric, all connections could be notified
 of needing to send data more slowly.
 
+A client MAY wish to honor a slightly increased rate (e.g. lbrt * 1.1) to account for clock skew or network backlogs being dumped all at once.
+
 #### 3.2.6. Extensibility
 
 In order to make this protocol extensible without versioning, clients and servers MUST ignore unknown command types.

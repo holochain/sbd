@@ -7,6 +7,23 @@ use std::sync::Arc;
 /// defined by the sbd spec
 const MAX_MSG_SIZE: usize = 20_000;
 
+/// defined by ed25519 spec
+const PK_SIZE: usize = 32;
+
+/// defined by ed25519 spec
+const SIG_SIZE: usize = 64;
+
+/// sbd spec defines headers to be the same size as ed25519 pub keys
+const HDR_SIZE: usize = PK_SIZE;
+
+/// defined by sbd spec
+const NONCE_SIZE: usize = 32;
+
+const F_LIMIT_BYTE_NANOS: &[u8] = b"lbrt";
+const F_LIMIT_IDLE_MILLIS: &[u8] = b"lidl";
+const F_AUTH_REQ: &[u8] = b"areq";
+const F_READY: &[u8] = b"srdy";
+
 #[cfg(feature = "raw_client")]
 pub mod raw_client;
 #[cfg(not(feature = "raw_client"))]
@@ -17,16 +34,18 @@ mod send_buf;
 /// Crypto to use. Note, the pair should be fresh for each new connection.
 pub trait Crypto {
     /// The pubkey.
-    fn pub_key(&self) -> &[u8; 32];
+    fn pub_key(&self) -> &[u8; PK_SIZE];
 
     /// Sign the nonce.
-    fn sign(&self, nonce: &[u8]) -> Result<[u8; 64]>;
+    fn sign(&self, nonce: &[u8]) -> Result<[u8; SIG_SIZE]>;
 }
 
 #[cfg(feature = "crypto")]
 mod default_crypto {
+    use super::*;
+
     /// Default signer. Use a fresh one for every new connection.
-    pub struct DefaultCrypto([u8; 32], ed25519_dalek::SigningKey);
+    pub struct DefaultCrypto([u8; PK_SIZE], ed25519_dalek::SigningKey);
 
     impl Default for DefaultCrypto {
         fn default() -> Self {
@@ -38,11 +57,11 @@ mod default_crypto {
     }
 
     impl super::Crypto for DefaultCrypto {
-        fn pub_key(&self) -> &[u8; 32] {
+        fn pub_key(&self) -> &[u8; PK_SIZE] {
             &self.0
         }
 
-        fn sign(&self, nonce: &[u8]) -> std::io::Result<[u8; 64]> {
+        fn sign(&self, nonce: &[u8]) -> std::io::Result<[u8; SIG_SIZE]> {
             use ed25519_dalek::Signer;
             Ok(self.1.sign(nonce).to_bytes())
         }
@@ -53,7 +72,7 @@ pub use default_crypto::*;
 
 /// Public key.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PubKey(pub [u8; 32]);
+pub struct PubKey(pub [u8; PK_SIZE]);
 
 impl std::fmt::Debug for PubKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -64,7 +83,8 @@ impl std::fmt::Debug for PubKey {
     }
 }
 
-const CMD_FLAG: &[u8; 28] = &[0; 28];
+/// defined by sbd spec
+const CMD_PREFIX: &[u8; 28] = &[0; 28];
 
 enum MsgType<'t> {
     Msg {
@@ -89,56 +109,56 @@ pub struct Msg(pub Vec<u8>);
 impl Msg {
     /// Get a reference to the slice containing the pubkey data.
     pub fn pub_key_ref(&self) -> &[u8] {
-        &self.0[..32]
+        &self.0[..PK_SIZE]
     }
 
     /// Extract a pubkey from the message.
     pub fn pub_key(&self) -> PubKey {
-        PubKey(self.0[..32].try_into().unwrap())
+        PubKey(self.0[..PK_SIZE].try_into().unwrap())
     }
 
     /// Get a reference to the slice containing the message data.
     pub fn message(&self) -> &[u8] {
-        &self.0[32..]
+        &self.0[PK_SIZE..]
     }
 
     // -- private -- //
 
     fn parse(&self) -> Result<MsgType<'_>> {
-        if self.0.len() < 32 {
+        if self.0.len() < PK_SIZE {
             return Err(Error::other("invalid message length"));
         }
-        if &self.0[..28] == CMD_FLAG {
-            match &self.0[28..32] {
-                b"lbrt" => {
-                    if self.0.len() != 32 + 4 {
+        if &self.0[..28] == CMD_PREFIX {
+            match &self.0[28..HDR_SIZE] {
+                F_LIMIT_BYTE_NANOS => {
+                    if self.0.len() != HDR_SIZE + 4 {
                         return Err(Error::other("invalid lbrt length"));
                     }
                     Ok(MsgType::LimitByteNanos(i32::from_be_bytes(
-                        self.0[32..].try_into().unwrap(),
+                        self.0[PK_SIZE..].try_into().unwrap(),
                     )))
                 }
-                b"lidl" => {
-                    if self.0.len() != 32 + 4 {
+                F_LIMIT_IDLE_MILLIS => {
+                    if self.0.len() != HDR_SIZE + 4 {
                         return Err(Error::other("invalid lidl length"));
                     }
                     Ok(MsgType::LimitIdleMillis(i32::from_be_bytes(
-                        self.0[32..].try_into().unwrap(),
+                        self.0[HDR_SIZE..].try_into().unwrap(),
                     )))
                 }
-                b"areq" => {
-                    if self.0.len() != 32 + 32 {
+                F_AUTH_REQ => {
+                    if self.0.len() != HDR_SIZE + NONCE_SIZE {
                         return Err(Error::other("invalid areq length"));
                     }
-                    Ok(MsgType::AuthReq(&self.0[32..]))
+                    Ok(MsgType::AuthReq(&self.0[HDR_SIZE..]))
                 }
-                b"srdy" => Ok(MsgType::Ready),
+                F_READY => Ok(MsgType::Ready),
                 _ => Ok(MsgType::Unknown),
             }
         } else {
             Ok(MsgType::Msg {
-                pub_key: &self.0[..32],
-                message: &self.0[32..],
+                pub_key: &self.0[..PK_SIZE],
+                message: &self.0[PK_SIZE..],
             })
         }
     }

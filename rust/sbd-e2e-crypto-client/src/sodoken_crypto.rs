@@ -13,7 +13,7 @@ impl Encryptor {
         sodoken::secretstream::init_push(
             &mut self.state,
             &mut header,
-            &mut self.sk.lock(),
+            &self.sk.lock(),
         )?;
         Ok(header)
     }
@@ -44,7 +44,7 @@ impl Decryptor {
         sodoken::secretstream::init_pull(
             &mut self.state,
             &header,
-            &mut self.sk.lock(),
+            &self.sk.lock(),
         )?;
         Ok(())
     }
@@ -52,12 +52,7 @@ impl Decryptor {
     /// Decrypt a new message.
     pub fn decrypt(&mut self, msg: &[u8]) -> Result<Vec<u8>> {
         let mut out = vec![0; msg.len() - sodoken::secretstream::ABYTES];
-        sodoken::secretstream::pull(
-            &mut self.state,
-            &mut out,
-            msg,
-            None,
-        )?;
+        sodoken::secretstream::pull(&mut self.state, &mut out, msg, None)?;
         Ok(out)
     }
 }
@@ -93,7 +88,10 @@ impl SodokenCrypto {
     }
 
     /// Construct a new encryption / decryption pair for given remote peer.
-    pub fn new_enc(&self, peer_sign_pk: &[u8; 32]) -> Result<(Encryptor, Decryptor)> {
+    pub fn new_enc(
+        &self,
+        peer_sign_pk: &[u8; 32],
+    ) -> Result<(Encryptor, Decryptor)> {
         let mut peer_enc_pk = [0; 32];
         sodoken::sign::pk_to_curve25519(&mut peer_enc_pk, peer_sign_pk)?;
 
@@ -118,13 +116,16 @@ impl SodokenCrypto {
             )?;
         }
 
-        Ok((Encryptor {
-            sk: tx,
-            state: sodoken::secretstream::State::default(),
-        }, Decryptor {
-            sk: rx,
-            state: sodoken::secretstream::State::default(),
-        }))
+        Ok((
+            Encryptor {
+                sk: tx,
+                state: sodoken::secretstream::State::default(),
+            },
+            Decryptor {
+                sk: rx,
+                state: sodoken::secretstream::State::default(),
+            },
+        ))
     }
 }
 

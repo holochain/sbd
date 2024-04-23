@@ -1,6 +1,11 @@
 use super::*;
 use std::collections::VecDeque;
 
+/// This benchmark sets up a server that only accepts 4 clients.
+/// Each iteration it:
+/// - tries to connect new clients until it gets a connect error.
+/// - drops one of the old clients so there is exactly 1 space free.
+/// - connects 1 new client and panics if it errors connecting.
 pub struct CTurnoverBenchmark {
     server: SbdServer,
     house: VecDeque<(WsRawSend, WsRawRecv)>,

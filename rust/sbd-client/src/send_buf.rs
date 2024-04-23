@@ -35,8 +35,7 @@ impl SendBuf {
 
         let now = this.origin.elapsed().as_nanos() as u64;
 
-        this.next_send_at = std::cmp::max(now, this.next_send_at)
-            + (pre_sent_bytes as u64 * this.limit_rate);
+        this.next_send_at = now + (pre_sent_bytes as u64 * this.limit_rate);
 
         this
     }
@@ -73,10 +72,10 @@ impl SendBuf {
         }
 
         if now < self.next_send_at {
-            let need_keepalive_at =
+            let need_keepalive_in =
                 self.idle_keepalive_nanos - (now - self.last_send);
             let nanos =
-                std::cmp::min(need_keepalive_at, self.next_send_at - now);
+                std::cmp::min(need_keepalive_in, self.next_send_at - now);
             Some(std::time::Duration::from_nanos(nanos))
         } else {
             None
@@ -92,8 +91,8 @@ impl SendBuf {
 
         // first check if we need to keepalive
         if now - self.last_send >= self.idle_keepalive_nanos {
-            let mut data = Vec::with_capacity(32);
-            data.extend_from_slice(CMD_FLAG);
+            let mut data = Vec::with_capacity(HDR_SIZE);
+            data.extend_from_slice(CMD_PREFIX);
             data.extend_from_slice(b"keep");
             self.raw_send(now, data).await?;
             return Ok(true);
@@ -117,7 +116,7 @@ impl SendBuf {
     /// Note, you'll need to explicitly call `write_next_queued()` or
     /// make additional sends in order to get this queued data actually sent.
     pub async fn send(&mut self, pk: &PubKey, data: &[u8]) -> Result<()> {
-        if data.len() > MAX_MSG_SIZE - 32 {
+        if data.len() > MAX_MSG_SIZE - PK_SIZE {
             return Err(Error::other("message too large"));
         }
 
@@ -128,7 +127,7 @@ impl SendBuf {
             self.write_next_queued().await?;
         }
 
-        let mut buf = Vec::with_capacity(32 + data.len());
+        let mut buf = Vec::with_capacity(PK_SIZE + data.len());
         buf.extend_from_slice(&pk.0[..]);
         buf.extend_from_slice(data);
         self.buf.push_back(buf);

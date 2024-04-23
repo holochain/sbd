@@ -50,14 +50,16 @@ impl PeerMap {
         use std::collections::hash_map::Entry;
 
         let mut lock = self.map.lock().unwrap();
-        match lock.entry(peer_pub_key.clone()) {
+        match lock.entry(peer_pub_key) {
             Entry::Occupied(_) => Err(Error::other("already connected")),
             Entry::Vacant(e) => {
                 let (enc, dec) = self.crypto.new_enc(&peer_pub_key.0)?;
                 let (msg_send, msg_recv) = tokio::sync::mpsc::channel(32);
                 let conn = SbdCryptoConnection {
                     pub_key: peer_pub_key,
-                    decrypt: tokio::sync::Mutex::new(Decrypt::new(msg_recv, dec)),
+                    decrypt: tokio::sync::Mutex::new(Decrypt::new(
+                        msg_recv, dec,
+                    )),
                     client: self.client.clone(),
                     encryptor: tokio::sync::Mutex::new(enc),
                 };
@@ -76,7 +78,7 @@ impl PeerMap {
 
         let sender = {
             let mut lock = self.map.lock().unwrap();
-            match lock.entry(pub_key.clone()) {
+            match lock.entry(pub_key) {
                 Entry::Occupied(e) => Some(e.get().msg_send.clone()),
                 Entry::Vacant(e) => {
                     if self.listener {
@@ -86,8 +88,7 @@ impl PeerMap {
                         let conn = SbdCryptoConnection {
                             pub_key,
                             decrypt: tokio::sync::Mutex::new(Decrypt::new(
-                                msg_recv,
-                                dec,
+                                msg_recv, dec,
                             )),
                             client: self.client.clone(),
                             encryptor: tokio::sync::Mutex::new(enc),
@@ -110,7 +111,7 @@ impl PeerMap {
         }
         if let Some(sender) = sender {
             println!("GOT RECV: forwarding: {:?}", msg.message());
-            let _ = sender.send(msg);
+            let _ = sender.send(msg).await;
         }
 
         Ok(())
@@ -124,7 +125,10 @@ struct Decrypt {
 
 impl Decrypt {
     pub fn new(msg_recv: MsgRecv, decryptor: Decryptor) -> Self {
-        Self { msg_recv, decryptor: decryptor }
+        Self {
+            msg_recv,
+            decryptor,
+        }
     }
 
     pub async fn recv(&mut self) -> Option<Vec<u8>> {
