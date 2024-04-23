@@ -1389,7 +1389,9 @@ name = "sbd-e2e-crypto-client"
 version = "0.0.1-alpha"
 dependencies = [
  "sbd-client",
+ "sbd-server",
  "sodoken",
+ "tokio",
 ]
 
 [[package]]

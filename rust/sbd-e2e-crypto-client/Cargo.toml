@@ -6,3 +6,8 @@ edition = "2021"
 [dependencies]
 sbd-client = { workspace = true }
 sodoken = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+sbd-server = { workspace = true }
+tokio = { workspace = true, features = [ "full" ] }
