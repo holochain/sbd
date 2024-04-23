@@ -31,8 +31,10 @@ impl WsRawConnect {
             danger_disable_certificate_check,
         } = self;
 
-        let scheme_ws = full_url.starts_with("ws://");
-        let scheme_wss = full_url.starts_with("wss://");
+        let request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(full_url).map_err(Error::other)?;
+
+        let scheme_ws = request.uri().scheme_str() == Some("ws");
+        let scheme_wss = request.uri().scheme_str() == Some("wss");
 
         if !scheme_ws && !scheme_wss {
             return Err(Error::other("scheme must be ws:// or wss://"));
@@ -41,8 +43,6 @@ impl WsRawConnect {
         if !allow_plain_text && scheme_ws {
             return Err(Error::other("plain text scheme not allowed"));
         }
-
-        let request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(full_url).map_err(Error::other)?;
 
         let host = match request.uri().host() {
             Some(host) => host.to_string(),
