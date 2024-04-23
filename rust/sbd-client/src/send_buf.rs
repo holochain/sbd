@@ -73,10 +73,10 @@ impl SendBuf {
         }
 
         if now < self.next_send_at {
-            let need_keepalive_at =
+            let need_keepalive_in =
                 self.idle_keepalive_nanos - (now - self.last_send);
             let nanos =
-                std::cmp::min(need_keepalive_at, self.next_send_at - now);
+                std::cmp::min(need_keepalive_in, self.next_send_at - now);
             Some(std::time::Duration::from_nanos(nanos))
         } else {
             None
