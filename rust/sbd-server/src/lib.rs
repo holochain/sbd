@@ -351,14 +351,14 @@ mod tests {
 
         let res_data = rcv2.recv().await.unwrap();
 
-        assert_eq!(&pk1.0, res_data.pub_key_ref());
+        assert_eq!(&pk1[..], res_data.pub_key_ref());
         assert_eq!(&b"hello"[..], res_data.message());
 
         client2.send(&pk1, b"world").await.unwrap();
 
         let res_data = rcv1.recv().await.unwrap();
 
-        assert_eq!(&pk2.0, res_data.pub_key_ref());
+        assert_eq!(&pk2[..], res_data.pub_key_ref());
         assert_eq!(&b"world"[..], res_data.message());
     }
 }

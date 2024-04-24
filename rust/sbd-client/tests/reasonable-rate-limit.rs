@@ -84,7 +84,7 @@ async fn run(
             let mut tot = 0;
             loop {
                 let r = r1.recv().await.unwrap();
-                assert_eq!(r.pub_key_ref(), &p2.0);
+                assert_eq!(r.pub_key_ref(), &p2[..]);
                 tot += r.message().len();
                 println!("r1 got {} bytes", tot);
                 rate1 += (32 + r.message().len()) as f64;
@@ -97,7 +97,7 @@ async fn run(
             let mut tot = 0;
             loop {
                 let r = r2.recv().await.unwrap();
-                assert_eq!(r.pub_key_ref(), &p1.0);
+                assert_eq!(r.pub_key_ref(), &p1[..]);
                 tot += r.message().len();
                 println!("r2 got {} bytes", tot);
                 rate2 += (32 + r.message().len()) as f64;
