@@ -49,10 +49,17 @@ mod default_crypto {
 
     impl Default for DefaultCrypto {
         fn default() -> Self {
-            let k =
-                ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
-            let pk = k.verifying_key().to_bytes();
-            Self(pk, k)
+            loop {
+                let k = ed25519_dalek::SigningKey::generate(
+                    &mut rand::thread_rng(),
+                );
+                let pk = k.verifying_key().to_bytes();
+                if &pk[..28] == CMD_PREFIX {
+                    continue;
+                } else {
+                    return Self(pk, k);
+                }
+            }
         }
     }
 

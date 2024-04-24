@@ -25,7 +25,7 @@ pub enum SbdCmd<'c> {
     Unknown,
 }
 
-const CMD_PREFIX: &[u8; 28] = &[0; 28];
+pub(crate) const CMD_PREFIX: &[u8; 28] = &[0; 28];
 
 impl<'c> SbdCmd<'c> {
     pub fn parse(payload: Payload<'c>) -> Result<Self> {

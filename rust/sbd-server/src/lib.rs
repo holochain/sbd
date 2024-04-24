@@ -165,6 +165,11 @@ async fn check_accept_connection(
                 Err(_) => return,
             };
 
+        // illegal pub key
+        if &pub_key.0[..28] == cmd::CMD_PREFIX {
+            return;
+        }
+
         let ws = Arc::new(ws);
 
         if let Some(ip) = ip {
