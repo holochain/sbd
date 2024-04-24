@@ -76,23 +76,32 @@ pub struct SodokenCrypto {
 impl SodokenCrypto {
     /// Construct a new crypto instance.
     pub fn new() -> Result<Self> {
-        let mut sign_pk = [0; 32];
-        let mut sign_sk = sodoken::LockedArray::new()?;
+        loop {
+            let mut sign_pk = [0; 32];
+            let mut sign_sk = sodoken::LockedArray::new()?;
 
-        sodoken::sign::keypair(&mut sign_pk, &mut sign_sk.lock())?;
+            sodoken::sign::keypair(&mut sign_pk, &mut sign_sk.lock())?;
 
-        let mut enc_pk = [0; 32];
-        sodoken::sign::pk_to_curve25519(&mut enc_pk, &sign_pk)?;
+            if sign_pk[..28] == [0; 28] {
+                continue;
+            }
 
-        let mut enc_sk = sodoken::LockedArray::new()?;
-        sodoken::sign::sk_to_curve25519(&mut enc_sk.lock(), &sign_sk.lock())?;
+            let mut enc_pk = [0; 32];
+            sodoken::sign::pk_to_curve25519(&mut enc_pk, &sign_pk)?;
 
-        Ok(Self {
-            sign_pk,
-            sign_sk: Mutex::new(sign_sk),
-            enc_pk,
-            enc_sk: Mutex::new(enc_sk),
-        })
+            let mut enc_sk = sodoken::LockedArray::new()?;
+            sodoken::sign::sk_to_curve25519(
+                &mut enc_sk.lock(),
+                &sign_sk.lock(),
+            )?;
+
+            return Ok(Self {
+                sign_pk,
+                sign_sk: Mutex::new(sign_sk),
+                enc_pk,
+                enc_sk: Mutex::new(enc_sk),
+            });
+        }
     }
 
     /// Construct a new encryption / decryption pair for given remote peer.
