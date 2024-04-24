@@ -38,7 +38,7 @@ async fn main() {
                 let msg = hex::decode(parts.pop_front().unwrap()).unwrap();
                 if let Some(s) = con_map.get(&id) {
                     let _ = s.send(ConCmd::Send(
-                        PubKey(pk.try_into().unwrap()),
+                        PubKey(std::sync::Arc::new(pk.try_into().unwrap())),
                         msg,
                     ));
                 }
@@ -88,7 +88,7 @@ async fn spawn_con(
         }
         println!("CMD/CLOSE/{id}");
     });
-    println!("CMD/CONNECT/{id}/{}", hex::encode(&pk.0));
+    println!("CMD/CONNECT/{id}/{}", hex::encode(&pk[..]));
     while let Some(cmd) = r.recv().await {
         match cmd {
             ConCmd::Close => break,

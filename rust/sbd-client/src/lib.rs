@@ -78,8 +78,16 @@ mod default_crypto {
 pub use default_crypto::*;
 
 /// Public key.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PubKey(pub [u8; PK_SIZE]);
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PubKey(pub Arc<[u8; PK_SIZE]>);
+
+impl std::ops::Deref for PubKey {
+    type Target = [u8; 32];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl std::fmt::Debug for PubKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -121,7 +129,7 @@ impl Msg {
 
     /// Extract a pubkey from the message.
     pub fn pub_key(&self) -> PubKey {
-        PubKey(self.0[..PK_SIZE].try_into().unwrap())
+        PubKey(Arc::new(self.0[..PK_SIZE].try_into().unwrap()))
     }
 
     /// Get a reference to the slice containing the message data.
@@ -330,7 +338,7 @@ impl SbdClient {
         Ok((
             this,
             full_url,
-            PubKey(*crypto.pub_key()),
+            PubKey(Arc::new(*crypto.pub_key())),
             MsgRecv(recv_recv),
         ))
     }
