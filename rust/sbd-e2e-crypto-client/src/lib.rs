@@ -1,383 +1,321 @@
 //! Sbd end to end encryption client.
 #![deny(missing_docs)]
 
+// Mutex strategy in this file is built on the assumption that this will
+// largely be network bound. Since we only have the one rate-limited connection
+// to the sbd server, it is okay to wrap it with a tokio Mutex and do the
+// encryption / decryption while that mutex is locked. Without this top-level
+// locking it is much easier to send secretstream headers out of order,
+// especially on the receiving new connection side when a naive implementation
+// trying to be clever might not lock the send side correctly.
+
 use std::collections::HashMap;
 use std::io::{Error, Result};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
 mod sodoken_crypto;
 pub use sodoken_crypto::*;
 
-type MsgSend = tokio::sync::mpsc::Sender<sbd_client::Msg>;
-type MsgRecv = tokio::sync::mpsc::Receiver<sbd_client::Msg>;
+/// Configuration for setting up an SbdClientCrypto connection.
+pub struct Config {
+    /// If `true` we will accept incoming "connections", otherwise
+    /// messages from nodes we didn't explicitly "connect" to will
+    /// be ignored.
+    pub listener: bool,
 
-type ConnSend = tokio::sync::mpsc::Sender<SbdCryptoConnection>;
-type ConnRecv =
-    tokio::sync::Mutex<tokio::sync::mpsc::Receiver<SbdCryptoConnection>>;
+    /// If `true` we will allow connecting to insecure plaintext servers.
+    pub allow_plain_text: bool,
 
-enum PeerEntry {
+    /// Cooldown time to prevent comms on "connection" close.
+    pub cooldown: std::time::Duration,
+
+    /// Max connection count.
+    pub max_connections: usize,
+
+    /// Max idle time before a connection is "closed".
+    pub max_idle: std::time::Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            listener: false,
+            allow_plain_text: false,
+            cooldown: std::time::Duration::from_secs(10),
+            max_connections: 4096,
+            max_idle: std::time::Duration::from_secs(10),
+        }
+    }
+}
+
+enum Conn {
     Cooldown(tokio::time::Instant),
-    Active(ConRef),
+    Active {
+        last_active: tokio::time::Instant,
+        enc: sodoken_crypto::Encryptor,
+        dec: sodoken_crypto::Decryptor,
+    },
 }
 
-struct ConRef {
-    recv: MsgSend,
-    #[allow(clippy::type_complexity)]
-    send: Weak<
-        Mutex<
-            Option<
-                Arc<
-                    tokio::sync::Mutex<(
-                        Weak<sbd_client::SbdClient>,
-                        sodoken_crypto::Encryptor,
-                    )>,
-                >,
-            >,
-        >,
-    >,
+struct Inner {
+    config: Arc<Config>,
+    crypto: sodoken_crypto::SodokenCrypto,
+    client: sbd_client::SbdClient,
+    map: HashMap<sbd_client::PubKey, Conn>,
 }
 
-enum FetchResult {
-    Err(Error),
-    None,
-    Cooldown,
-    Insert(SbdCryptoConnection, [u8; 24], MsgSend),
-    Fetch(MsgSend),
-}
+impl Inner {
+    pub async fn close(&mut self) {
+        self.client.close().await;
+    }
 
-struct PeerMap {
-    weak_client: Weak<sbd_client::SbdClient>,
-    crypto: Arc<sodoken_crypto::SodokenCrypto>,
-    listener: bool,
-    conn_send: ConnSend,
-    map: Arc<Mutex<HashMap<sbd_client::PubKey, PeerEntry>>>,
-    weak_peer_map: Weak<Self>,
-}
-
-impl PeerMap {
-    fn cool_down(&self, pub_key: sbd_client::PubKey) {
-        let t =
-            tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-        let rm = self
-            .map
-            .lock()
-            .unwrap()
-            .insert(pub_key, PeerEntry::Cooldown(t));
-        if let Some(PeerEntry::Active(conn_ref)) = rm {
-            if let Some(send) = conn_ref.send.upgrade() {
-                send.lock().unwrap().take();
-            }
+    pub async fn close_peer(&mut self, pk: &sbd_client::PubKey) {
+        if let Some(conn) = self.map.get_mut(pk) {
+            *conn = Conn::Cooldown(
+                tokio::time::Instant::now() + self.config.cooldown,
+            );
         }
     }
 
-    async fn handle_msg_okay(&self, msg: sbd_client::Msg) -> bool {
-        match self.fetch_or_maybe_insert_conn(msg.pub_key(), self.listener) {
-            FetchResult::Err(_) => false,
-            FetchResult::Cooldown => true,
-            FetchResult::Fetch(msg_send) => {
-                let _ = msg_send.send(msg).await;
-                true
-            }
-            FetchResult::None => true,
-            FetchResult::Insert(c, h, m) => {
-                let _ = c.raw_send(&h).await;
-                let _ = m.send(msg).await;
-                self.conn_send.send(c).await.is_ok()
-            }
-        }
-    }
+    pub async fn recv(
+        &mut self,
+        msg: sbd_client::Msg,
+    ) -> Result<Option<(sbd_client::PubKey, Vec<u8>)>> {
+        let Self {
+            config,
+            crypto,
+            client,
+            map,
+        } = self;
 
-    fn prune(map: &mut HashMap<sbd_client::PubKey, PeerEntry>) {
-        let now = tokio::time::Instant::now();
-        map.retain(|_, e| match e {
-            PeerEntry::Cooldown(at) => now < *at,
-            PeerEntry::Active(conn_ref) => {
-                if let Some(send) = conn_ref.send.upgrade() {
-                    send.lock().unwrap().is_some()
-                } else {
-                    false
+        let pk = msg.pub_key();
+
+        match Self::assert_con(&pk, config, crypto, map, config.listener) {
+            Err(_) => Ok(None),
+            Ok((conn, hdr)) => {
+                if let Some(hdr) = hdr {
+                    client.send(&pk, &hdr).await?;
+                }
+
+                match conn {
+                    Conn::Cooldown(_) => Ok(None),
+                    Conn::Active {
+                        last_active, dec, ..
+                    } => {
+                        *last_active = tokio::time::Instant::now();
+
+                        match dec.decrypt(msg.message()) {
+                            Err(_) => {
+                                *conn = Conn::Cooldown(
+                                    tokio::time::Instant::now()
+                                        + config.cooldown,
+                                );
+                                Ok(None)
+                            }
+                            Ok(None) => Ok(None),
+                            Ok(Some(msg)) => Ok(Some((pk, msg))),
+                        }
+                    }
                 }
             }
-        });
+        }
     }
 
-    fn try_insert_conn(
-        &self,
-        pub_key: sbd_client::PubKey,
-    ) -> Result<(SbdCryptoConnection, [u8; 24])> {
-        match self.fetch_or_maybe_insert_conn(pub_key, true) {
-            FetchResult::Err(err) => Err(err),
-            FetchResult::Cooldown => {
+    pub async fn send(
+        &mut self,
+        pk: &sbd_client::PubKey,
+        msg: &[u8],
+    ) -> Result<()> {
+        let Self {
+            config,
+            crypto,
+            client,
+            map,
+        } = self;
+
+        let (conn, hdr) = Self::assert_con(pk, config, crypto, map, true)?;
+
+        match conn {
+            Conn::Cooldown(_) => {
                 Err(Error::other("connection still cooling down"))
             }
-            FetchResult::Fetch(_) => {
-                Err(Error::other("connection already active"))
-            }
-            FetchResult::None => unreachable!(),
-            FetchResult::Insert(c, h, _) => Ok((c, h)),
-        }
-    }
-
-    fn fetch_or_maybe_insert_conn(
-        &self,
-        pub_key: sbd_client::PubKey,
-        should_insert: bool,
-    ) -> FetchResult {
-        let mut lock = self.map.lock().unwrap();
-
-        Self::prune(&mut lock);
-
-        use std::collections::hash_map::Entry;
-        match lock.entry(pub_key) {
-            Entry::Occupied(e) => match e.get() {
-                PeerEntry::Cooldown(_) => FetchResult::Cooldown,
-                PeerEntry::Active(r) => FetchResult::Fetch(r.recv.clone()),
-            },
-            Entry::Vacant(e) => {
-                if !should_insert {
-                    return FetchResult::None;
-                }
-
-                let (enc, hdr, dec) = match self.crypto.new_enc(&pub_key.0) {
-                    Err(err) => return FetchResult::Err(err),
-                    Ok(r) => r,
-                };
-
-                let send = (self.weak_client.clone(), enc);
-                let send = tokio::sync::Mutex::new(send);
-                let send = Arc::new(send);
-                let send = Some(send);
-                let send = Mutex::new(send);
-                let send = Arc::new(send);
-                let weak_send = Arc::downgrade(&send);
-                let (msg_send, msg_recv) = tokio::sync::mpsc::channel(32);
-                let msg_recv = tokio::sync::Mutex::new((msg_recv, dec));
-
-                let conn = SbdCryptoConnection {
-                    pub_key,
-                    recv: msg_recv,
-                    send,
-                    weak_peer_map: self.weak_peer_map.clone(),
-                };
-
-                let conn_ref = ConRef {
-                    recv: msg_send.clone(),
-                    send: weak_send,
-                };
-
-                e.insert(PeerEntry::Active(conn_ref));
-
-                FetchResult::Insert(conn, hdr, msg_send)
-            }
-        }
-    }
-}
-
-/// A secure communication channel over an sbd relay server to a single
-/// remote peer.
-pub struct SbdCryptoConnection {
-    pub_key: sbd_client::PubKey,
-    recv: tokio::sync::Mutex<(MsgRecv, sodoken_crypto::Decryptor)>,
-    #[allow(clippy::type_complexity)]
-    send: Arc<
-        Mutex<
-            Option<
-                Arc<
-                    tokio::sync::Mutex<(
-                        Weak<sbd_client::SbdClient>,
-                        sodoken_crypto::Encryptor,
-                    )>,
-                >,
-            >,
-        >,
-    >,
-    weak_peer_map: Weak<PeerMap>,
-}
-
-impl Drop for SbdCryptoConnection {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
-
-impl SbdCryptoConnection {
-    /// Receive a message from the remote peer.
-    pub async fn recv(&self) -> Option<Vec<u8>> {
-        let mut out = None;
-        {
-            let mut lock = self.recv.lock().await;
-            for _ in 0..2 {
-                let raw_msg = match lock.0.recv().await {
-                    None => break,
-                    Some(raw_msg) => raw_msg,
-                };
-
-                match lock.1.decrypt(raw_msg.message()) {
-                    Ok(Some(msg)) => {
-                        out = Some(msg);
-                        break;
+            Conn::Active {
+                last_active, enc, ..
+            } => {
+                *last_active = tokio::time::Instant::now();
+                if let Err(err) = async {
+                    if let Some(hdr) = hdr {
+                        client.send(pk, &hdr).await?;
                     }
-                    Ok(None) => (),
-                    Err(_) => break,
+                    let msg = enc.encrypt(msg)?;
+                    client.send(pk, &msg).await
+                }
+                .await
+                {
+                    *conn = Conn::Cooldown(
+                        tokio::time::Instant::now() + config.cooldown,
+                    );
+                    Err(err)
+                } else {
+                    Ok(())
                 }
             }
         }
-        match out {
-            Some(msg) => Some(msg),
-            None => {
-                self.close();
-                None
-            }
-        }
     }
 
-    /// Send a message to the remote peer.
-    pub async fn send(&self, msg: &[u8]) -> Result<()> {
-        let result = self.send_inner(msg).await;
-        if result.is_err() {
-            self.close();
-        }
-        result
-    }
+    fn prune(config: &Config, map: &mut HashMap<sbd_client::PubKey, Conn>) {
+        let now = tokio::time::Instant::now();
 
-    async fn send_inner(&self, msg: &[u8]) -> Result<()> {
-        let inner = self.send.lock().unwrap().clone();
-        let inner = match inner {
-            Some(inner) => inner,
-            None => return Err(Error::other("closed")),
-        };
-        let mut lock = inner.lock().await;
-        let msg = lock.1.encrypt(msg)?;
-        if let Some(client) = lock.0.upgrade() {
-            client.send(&self.pub_key, &msg).await?;
-            Ok(())
-        } else {
-            Err(Error::other("closed"))
-        }
-    }
-
-    /// Close the connection.
-    pub fn close(&self) {
-        self.send.lock().unwrap().take();
-        if let Some(peer_map) = self.weak_peer_map.upgrade() {
-            peer_map.cool_down(self.pub_key);
-        }
-    }
-
-    async fn raw_send(&self, msg: &[u8]) -> Result<()> {
-        let result = self.raw_send_inner(msg).await;
-        if result.is_err() {
-            self.close();
-        }
-        result
-    }
-
-    async fn raw_send_inner(&self, msg: &[u8]) -> Result<()> {
-        let inner = self.send.lock().unwrap().clone();
-        let inner = match inner {
-            Some(inner) => inner,
-            None => return Err(Error::other("closed")),
-        };
-        let lock = inner.lock().await;
-        if let Some(client) = lock.0.upgrade() {
-            client.send(&self.pub_key, msg).await?;
-            Ok(())
-        } else {
-            Err(Error::other("closed"))
-        }
-    }
-}
-
-/// A registry for establishing (or accepting incoming) secure communications
-/// channels over an sbd relay server.
-pub struct SbdCryptoEndpoint {
-    pub_key: sbd_client::PubKey,
-    recv_task: tokio::task::JoinHandle<()>,
-    weak_peer_map: Weak<PeerMap>,
-    conn_recv: ConnRecv,
-}
-
-impl Drop for SbdCryptoEndpoint {
-    fn drop(&mut self) {
-        self.recv_task.abort();
-    }
-}
-
-impl SbdCryptoEndpoint {
-    /// Connect to an sbd server as a client.
-    /// If listener is set to `true`, messages from unknown peers will
-    /// be received as new connections. If listener is set to `false`,
-    /// messages from unknown peers will be ignored.
-    pub async fn new(
-        url: &str,
-        listener: bool,
-        allow_plain_text: bool,
-    ) -> Result<Self> {
-        let crypto = Arc::new(SodokenCrypto::new()?);
-
-        let (client, _, pub_key, mut recv) =
-            sbd_client::SbdClient::connect_config(
-                url,
-                &*crypto,
-                sbd_client::SbdClientConfig {
-                    allow_plain_text,
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-        let client = Arc::new(client);
-
-        let (conn_send, conn_recv) = tokio::sync::mpsc::channel(32);
-
-        let peer_map = Arc::new_cyclic(|this| PeerMap {
-            weak_client: Arc::downgrade(&client),
-            crypto,
-            listener,
-            conn_send,
-            map: Arc::new(Mutex::new(HashMap::default())),
-            weak_peer_map: this.clone(),
-        });
-        let weak_peer_map = Arc::downgrade(&peer_map);
-
-        let recv_task = tokio::task::spawn(async move {
-            while let Some(msg) = recv.recv().await {
-                if !peer_map.handle_msg_okay(msg).await {
-                    break;
+        map.retain(|_, c| {
+            if let Conn::Active { last_active, .. } = c {
+                if now - *last_active > config.max_idle {
+                    *c = Conn::Cooldown(
+                        tokio::time::Instant::now() + config.cooldown,
+                    );
                 }
             }
-            client.close().await;
-        });
 
-        Ok(Self {
-            pub_key,
-            recv_task,
-            weak_peer_map,
-            conn_recv: tokio::sync::Mutex::new(conn_recv),
+            if let Conn::Cooldown(at) = c {
+                now < *at
+            } else {
+                true
+            }
         })
     }
 
-    /// The local pub key of this node.
-    pub fn pub_key(&self) -> sbd_client::PubKey {
-        self.pub_key
+    fn assert_con<'a>(
+        pk: &sbd_client::PubKey,
+        config: &Config,
+        crypto: &sodoken_crypto::SodokenCrypto,
+        map: &'a mut HashMap<sbd_client::PubKey, Conn>,
+        do_create: bool,
+    ) -> Result<(&'a mut Conn, Option<[u8; 24]>)> {
+        use std::collections::hash_map::Entry;
+
+        if map.len() >= config.max_connections {
+            Self::prune(config, map);
+        }
+
+        let len = map.len();
+
+        match map.entry(pk.clone()) {
+            Entry::Occupied(e) => Ok((e.into_mut(), None)),
+            Entry::Vacant(e) => {
+                if !do_create {
+                    return Err(Error::other("ignore"));
+                }
+                if len >= config.max_connections {
+                    return Err(Error::other("too many connections"));
+                }
+                let (enc, hdr, dec) = crypto.new_enc(pk)?;
+                Ok((
+                    e.insert(Conn::Active {
+                        last_active: tokio::time::Instant::now(),
+                        enc,
+                        dec,
+                    }),
+                    Some(hdr),
+                ))
+            }
+        }
+    }
+}
+
+/// An encrypted connection to peers through an Sbd server.
+pub struct SbdClientCrypto {
+    pub_key: sbd_client::PubKey,
+    inner: tokio::sync::Mutex<Option<Inner>>,
+    recv: tokio::sync::Mutex<sbd_client::MsgRecv>,
+}
+
+impl SbdClientCrypto {
+    /// Establish a new connection.
+    pub async fn new(url: &str, config: Arc<Config>) -> Result<Self> {
+        let client_config = sbd_client::SbdClientConfig {
+            allow_plain_text: config.allow_plain_text,
+            ..Default::default()
+        };
+        let crypto = sodoken_crypto::SodokenCrypto::new()?;
+        use sbd_client::Crypto;
+        let pub_key = sbd_client::PubKey(Arc::new(*crypto.pub_key()));
+        let (client, _, _, recv) =
+            sbd_client::SbdClient::connect_config(url, &crypto, client_config)
+                .await?;
+        let inner = tokio::sync::Mutex::new(Some(Inner {
+            config,
+            crypto,
+            client,
+            map: HashMap::default(),
+        }));
+        let recv = tokio::sync::Mutex::new(recv);
+        Ok(Self {
+            pub_key,
+            inner,
+            recv,
+        })
     }
 
-    /// Receive a new incoming connection.
-    pub async fn recv(&self) -> Option<SbdCryptoConnection> {
-        self.conn_recv.lock().await.recv().await
+    /// Get the public key of this node.
+    pub fn pub_key(&self) -> &sbd_client::PubKey {
+        &self.pub_key
     }
 
-    /// Establish a new outgoing connection.
-    pub async fn connect(
+    /// Receive a message from a peer.
+    pub async fn recv(&self) -> Option<(sbd_client::PubKey, Vec<u8>)> {
+        loop {
+            // hold this lock the whole time incase some other task
+            // is also invoking recv.
+            let mut recv_lock = self.recv.lock().await;
+
+            let raw_msg = match recv_lock.recv().await {
+                None => {
+                    self.close().await;
+                    return None;
+                }
+                Some(raw_msg) => raw_msg,
+            };
+
+            if let Some(inner) = &mut *self.inner.lock().await {
+                match inner.recv(raw_msg).await {
+                    Err(_) => {
+                        self.close().await;
+                        return None;
+                    }
+                    Ok(None) => continue,
+                    Ok(Some(o)) => return Some(o),
+                }
+            } else {
+                self.close().await;
+                return None;
+            }
+        }
+    }
+
+    /// Send a message to a peer.
+    pub async fn send(
         &self,
-        peer_pub_key: sbd_client::PubKey,
-    ) -> Result<SbdCryptoConnection> {
-        if let Some(peer_map) = self.weak_peer_map.upgrade() {
-            let (conn, hdr) = peer_map.try_insert_conn(peer_pub_key)?;
-            conn.raw_send(&hdr).await?;
-            Ok(conn)
+        pk: &sbd_client::PubKey,
+        msg: &[u8],
+    ) -> Result<()> {
+        let mut lock = self.inner.lock().await;
+        if let Some(inner) = &mut *lock {
+            inner.send(pk, msg).await
         } else {
             Err(Error::other("closed"))
+        }
+    }
+
+    /// Close a connection to a specific peer.
+    pub async fn close_peer(&self, pk: &sbd_client::PubKey) {
+        if let Some(inner) = self.inner.lock().await.as_mut() {
+            inner.close_peer(pk).await;
+        }
+    }
+
+    /// Close the entire sbd client connection.
+    pub async fn close(&self) {
+        if let Some(mut inner) = self.inner.lock().await.take() {
+            inner.close().await;
         }
     }
 }
