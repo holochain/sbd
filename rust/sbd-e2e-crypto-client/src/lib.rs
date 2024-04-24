@@ -192,9 +192,14 @@ impl Inner {
     ) -> Result<(&'a mut Conn, Option<[u8; 24]>)> {
         use std::collections::hash_map::Entry;
 
-        if map.len() >= config.max_connections {
-            Self::prune(config, map);
-        }
+        // TODO - more efficient to only prune if we need to
+        //        but then, we'd need to manage expired cooldowns
+        //        in-line, lest we keep denying connections
+        //if map.len() >= config.max_connections {
+        //    Self::prune(config, map);
+        //}
+        // instead, for now, we just always prune
+        Self::prune(config, map);
 
         let len = map.len();
 
