@@ -10,7 +10,7 @@ impl Cfg {
             allow_plain_text: true,
             cooldown: tokio::time::Duration::from_secs(1),
             max_connections: 100,
-            max_idle: tokio::time::Duration::from_secs(1),
+            max_idle: tokio::time::Duration::from_secs(10),
         })
     }
 
@@ -26,6 +26,11 @@ impl Cfg {
 
     pub fn cool(mut self, cool: std::time::Duration) -> Self {
         self.0.cooldown = cool;
+        self
+    }
+
+    pub fn idle(mut self, idle: std::time::Duration) -> Self {
+        self.0.max_idle = idle;
         self
     }
 }
@@ -156,6 +161,28 @@ async fn max_connections_config_works() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn max_msg_size() {
+    let test = Test::new().await;
+
+    let (c1, c2) = tokio::join!(test.conn(Cfg::d()), test.conn(Cfg::d()),);
+
+    const MSG: &[u8] = &[0xdb; 21_000];
+
+    for (size, is_ok) in [
+        (21_000, false),
+        (20_000, false),
+        (19_968, false),
+        (19_952, false),
+        (19_951, true),
+    ] {
+        assert_eq!(is_ok, c2.send(c1.pub_key(), &MSG[..size]).await.is_ok())
+    }
+
+    let (_, r) = c1.recv().await.unwrap();
+    assert_eq!(&MSG[..19_951], r.as_slice());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn cooldown_config_works_from_send_side() {
     let test = Test::new().await;
 
@@ -171,6 +198,11 @@ async fn cooldown_config_works_from_send_side() {
     )
     .unwrap();
 
+    let (_, r) = c1.recv().await.unwrap();
+    assert!(r == b"msg-a" || r == b"msg-b");
+    let (_, r) = c1.recv().await.unwrap();
+    assert!(r == b"msg-a" || r == b"msg-b");
+
     c2.close_peer(c1.pub_key()).await;
     c3.close_peer(c1.pub_key()).await;
 
@@ -180,9 +212,110 @@ async fn cooldown_config_works_from_send_side() {
     assert!(c2.send(c1.pub_key(), b"msg-d").await.is_ok());
 
     let (_, r) = c1.recv().await.unwrap();
-    assert!(r == b"msg-a" || r == b"msg-b");
-    let (_, r) = c1.recv().await.unwrap();
-    assert!(r == b"msg-a" || r == b"msg-b");
-    let (_, r) = c1.recv().await.unwrap();
     assert!(r == b"msg-d");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cooldown_config_works_from_recv_side() {
+    let test = Test::new().await;
+
+    let (c1, c2, c3) = tokio::join!(
+        test.conn(Cfg::d().cool(std::time::Duration::from_secs(5000))),
+        test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
+        test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
+    );
+
+    tokio::try_join!(
+        c3.send(c1.pub_key(), b"msg-a"),
+        c3.send(c2.pub_key(), b"msg-b"),
+    )
+    .unwrap();
+
+    let (_, r) = c1.recv().await.unwrap();
+    assert_eq!(b"msg-a", r.as_slice());
+    let (_, r) = c2.recv().await.unwrap();
+    assert_eq!(b"msg-b", r.as_slice());
+
+    c1.close_peer(c3.pub_key()).await;
+    c2.close_peer(c3.pub_key()).await;
+
+    // note we have to close the send side too, or it won't re-init crypto
+    c3.close_peer(c1.pub_key()).await;
+    c3.close_peer(c2.pub_key()).await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+
+    tokio::try_join!(
+        c3.send(c1.pub_key(), b"msg-c"),
+        c3.send(c2.pub_key(), b"msg-d"),
+    )
+    .unwrap();
+
+    let (_, r) = c2.recv().await.unwrap();
+    assert_eq!(b"msg-d", r.as_slice());
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), c1.recv())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn idle_close_even_if_sending() {
+    let (took, exited_early) =
+        idle_close_even_if_sending_inner(std::time::Duration::from_secs(5000))
+            .await;
+    assert!(!exited_early);
+    let iter_millis = took.as_millis() as u64 / 20;
+    println!("1 iter took: {} millis", iter_millis);
+
+    // let's try to have it close right in the middle of the run
+    let (_took, exited_early) = idle_close_even_if_sending_inner(
+        std::time::Duration::from_millis(iter_millis * 10),
+    )
+    .await;
+    assert!(exited_early);
+}
+
+async fn idle_close_even_if_sending_inner(
+    idle_dur: std::time::Duration,
+) -> (std::time::Duration, bool) {
+    let test = Test::new().await;
+
+    let (c1, c2) = tokio::join!(
+        test.conn(Cfg::d().idle(idle_dur)),
+        test.conn(Cfg::d().idle(idle_dur)),
+    );
+
+    c2.send(c1.pub_key(), b"").await.unwrap();
+    let _ = c1.recv().await.unwrap();
+
+    let mut exited_early = false;
+
+    let start = tokio::time::Instant::now();
+    for i in 0..20 {
+        let istart = tokio::time::Instant::now();
+        if c2.send(c1.pub_key(), &[i]).await.is_err() {
+            exited_early = true;
+            break;
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(1), c1.recv())
+            .await
+        {
+            Err(_) | Ok(None) => {
+                exited_early = true;
+                break;
+            }
+            Ok(Some((_, r))) => {
+                assert_eq!(&[i], r.as_slice());
+            }
+        }
+        let ielapsed = istart.elapsed();
+        let ten = std::time::Duration::from_millis(10);
+        if ielapsed < ten {
+            tokio::time::sleep(ten - ielapsed).await;
+        }
+    }
+    (start.elapsed(), exited_early)
 }

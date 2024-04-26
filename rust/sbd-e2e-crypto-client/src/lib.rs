@@ -32,7 +32,7 @@ pub struct Config {
     /// Max connection count.
     pub max_connections: usize,
 
-    /// Max idle time before a connection is "closed".
+    /// Max time without receiving before a connection is "closed".
     pub max_idle: std::time::Duration,
 }
 
@@ -139,10 +139,7 @@ impl Inner {
             Conn::Cooldown(_) => {
                 Err(Error::other("connection still cooling down"))
             }
-            Conn::Active {
-                last_active, enc, ..
-            } => {
-                *last_active = tokio::time::Instant::now();
+            Conn::Active { enc, .. } => {
                 if let Err(err) = async {
                     if let Some(hdr) = hdr {
                         client.send(pk, &hdr).await?;
@@ -302,6 +299,15 @@ impl SbdClientCrypto {
         pk: &sbd_client::PubKey,
         msg: &[u8],
     ) -> Result<()> {
+        const SBD_MAX: usize = 20_000;
+        const SBD_HDR: usize = 32;
+        const SS_ABYTES: usize = sodoken::secretstream::ABYTES;
+        const MAX_MSG: usize = SBD_MAX - SBD_HDR - SS_ABYTES;
+
+        if msg.len() > MAX_MSG {
+            return Err(Error::other("message too long"));
+        }
+
         let mut lock = self.inner.lock().await;
         if let Some(inner) = &mut *lock {
             inner.send(pk, msg).await
