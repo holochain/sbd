@@ -47,5 +47,5 @@ tokio-rustls = "0.25.0"
 tokio-tungstenite = { version = "0.21.0", default-features = false }
 webpki-roots = "0.26.1"
 
-[patch.crates-io]
-sodoken = { path = "../sodoken" }
+#[patch.crates-io]
+#sodoken = { path = "../sodoken" }
