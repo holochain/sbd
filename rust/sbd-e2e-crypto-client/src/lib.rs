@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::io::{Error, Result};
 use std::sync::{Arc, Mutex};
 
+pub use sbd_client::PubKey;
+
 mod sodoken_crypto;
 pub use sodoken_crypto::*;
 
@@ -61,7 +63,7 @@ struct Inner {
     config: Arc<Config>,
     crypto: sodoken_crypto::SodokenCrypto,
     client: sbd_client::SbdClient,
-    map: HashMap<sbd_client::PubKey, Conn>,
+    map: HashMap<PubKey, Conn>,
 }
 
 impl Inner {
@@ -69,7 +71,7 @@ impl Inner {
         self.client.close().await;
     }
 
-    pub async fn close_peer(&mut self, pk: &sbd_client::PubKey) {
+    pub async fn close_peer(&mut self, pk: &PubKey) {
         if let Some(conn) = self.map.get_mut(pk) {
             *conn = Conn::Cooldown(
                 tokio::time::Instant::now() + self.config.cooldown,
@@ -80,7 +82,7 @@ impl Inner {
     pub async fn recv(
         &mut self,
         msg: sbd_client::Msg,
-    ) -> Result<Option<(sbd_client::PubKey, Vec<u8>)>> {
+    ) -> Result<Option<(PubKey, Vec<u8>)>> {
         let Self {
             config,
             crypto,
@@ -121,11 +123,7 @@ impl Inner {
         }
     }
 
-    pub async fn send(
-        &mut self,
-        pk: &sbd_client::PubKey,
-        msg: &[u8],
-    ) -> Result<()> {
+    pub async fn send(&mut self, pk: &PubKey, msg: &[u8]) -> Result<()> {
         let Self {
             config,
             crypto,
@@ -160,7 +158,7 @@ impl Inner {
         }
     }
 
-    fn prune(config: &Config, map: &mut HashMap<sbd_client::PubKey, Conn>) {
+    fn prune(config: &Config, map: &mut HashMap<PubKey, Conn>) {
         let now = tokio::time::Instant::now();
 
         map.retain(|_, c| {
@@ -181,10 +179,10 @@ impl Inner {
     }
 
     fn assert_con<'a>(
-        pk: &sbd_client::PubKey,
+        pk: &PubKey,
         config: &Config,
         crypto: &sodoken_crypto::SodokenCrypto,
-        map: &'a mut HashMap<sbd_client::PubKey, Conn>,
+        map: &'a mut HashMap<PubKey, Conn>,
         do_create: bool,
     ) -> Result<(&'a mut Conn, Option<[u8; 24]>)> {
         use std::collections::hash_map::Entry;
@@ -225,7 +223,7 @@ impl Inner {
 
 /// An encrypted connection to peers through an Sbd server.
 pub struct SbdClientCrypto {
-    pub_key: sbd_client::PubKey,
+    pub_key: PubKey,
     inner: tokio::sync::Mutex<Option<Inner>>,
     recv: tokio::sync::Mutex<sbd_client::MsgRecv>,
 }
@@ -239,7 +237,7 @@ impl SbdClientCrypto {
         };
         let crypto = sodoken_crypto::SodokenCrypto::new()?;
         use sbd_client::Crypto;
-        let pub_key = sbd_client::PubKey(Arc::new(*crypto.pub_key()));
+        let pub_key = PubKey(Arc::new(*crypto.pub_key()));
         let (client, _, _, recv) =
             sbd_client::SbdClient::connect_config(url, &crypto, client_config)
                 .await?;
@@ -258,12 +256,12 @@ impl SbdClientCrypto {
     }
 
     /// Get the public key of this node.
-    pub fn pub_key(&self) -> &sbd_client::PubKey {
+    pub fn pub_key(&self) -> &PubKey {
         &self.pub_key
     }
 
     /// Receive a message from a peer.
-    pub async fn recv(&self) -> Option<(sbd_client::PubKey, Vec<u8>)> {
+    pub async fn recv(&self) -> Option<(PubKey, Vec<u8>)> {
         loop {
             // hold this lock the whole time incase some other task
             // is also invoking recv.
@@ -294,11 +292,7 @@ impl SbdClientCrypto {
     }
 
     /// Send a message to a peer.
-    pub async fn send(
-        &self,
-        pk: &sbd_client::PubKey,
-        msg: &[u8],
-    ) -> Result<()> {
+    pub async fn send(&self, pk: &PubKey, msg: &[u8]) -> Result<()> {
         const SBD_MAX: usize = 20_000;
         const SBD_HDR: usize = 32;
         const SS_ABYTES: usize = sodoken::secretstream::ABYTES;
@@ -317,7 +311,7 @@ impl SbdClientCrypto {
     }
 
     /// Close a connection to a specific peer.
-    pub async fn close_peer(&self, pk: &sbd_client::PubKey) {
+    pub async fn close_peer(&self, pk: &PubKey) {
         if let Some(inner) = self.inner.lock().await.as_mut() {
             inner.close_peer(pk).await;
         }
