@@ -2,9 +2,7 @@ use sbd_client::*;
 use sbd_server::*;
 use std::sync::Arc;
 
-async fn get_client(
-    addrs: &[std::net::SocketAddr],
-) -> (SbdClient, String, sbd_client::PubKey, MsgRecv) {
+async fn get_client(addrs: &[std::net::SocketAddr]) -> (SbdClient, MsgRecv) {
     for addr in addrs {
         if let Ok(r) = SbdClient::connect_config(
             &format!("ws://{addr}"),
@@ -34,8 +32,10 @@ async fn reasonable_rate_limit() {
 
     let server = SbdServer::new(config).await.unwrap();
 
-    let (mut c1, _, p1, mut r1) = get_client(server.bind_addrs()).await;
-    let (mut c2, _, p2, mut r2) = get_client(server.bind_addrs()).await;
+    let (mut c1, mut r1) = get_client(server.bind_addrs()).await;
+    let p1 = c1.pub_key().clone();
+    let (mut c2, mut r2) = get_client(server.bind_addrs()).await;
+    let p2 = c2.pub_key().clone();
 
     //warmup
     run(2, &mut c1, &p1, &mut r1, &mut c2, &p2, &mut r2).await;

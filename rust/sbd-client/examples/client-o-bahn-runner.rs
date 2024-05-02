@@ -66,7 +66,8 @@ async fn connect(addrs: &[String]) -> (SbdClient, PubKey, MsgRecv) {
         )
         .await
         {
-            return (c.0, c.2, c.3);
+            let pk = c.0.pub_key().clone();
+            return (c.0, pk, c.1);
         }
     }
     panic!()
