@@ -273,7 +273,7 @@ impl SbdClientCrypto {
         let crypto = sodoken_crypto::SodokenCrypto::new()?;
         use sbd_client::Crypto;
         let pub_key = PubKey(Arc::new(*crypto.pub_key()));
-        let (client, _, _, recv) =
+        let (client, recv) =
             sbd_client::SbdClient::connect_config(url, &crypto, client_config)
                 .await?;
         let inner = tokio::sync::Mutex::new(Some(Inner {
