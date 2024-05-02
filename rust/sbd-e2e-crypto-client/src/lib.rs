@@ -79,6 +79,41 @@ impl Inner {
         }
     }
 
+    pub async fn assert(&mut self, pk: &PubKey) -> Result<()> {
+        let Self {
+            config,
+            crypto,
+            client,
+            map,
+        } = self;
+
+        let (conn, hdr) = Self::priv_assert_con(pk, config, crypto, map, true)?;
+
+        match conn {
+            Conn::Cooldown(_) => {
+                Err(Error::other("connection still cooling down"))
+            }
+            Conn::Active { .. } => {
+                if let Err(err) = async {
+                    if let Some(hdr) = hdr {
+                        client.send(pk, &hdr).await
+                    } else {
+                        Ok(())
+                    }
+                }
+                .await
+                {
+                    *conn = Conn::Cooldown(
+                        tokio::time::Instant::now() + config.cooldown,
+                    );
+                    Err(err)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
     pub async fn recv(
         &mut self,
         msg: sbd_client::Msg,
@@ -92,7 +127,7 @@ impl Inner {
 
         let pk = msg.pub_key();
 
-        match Self::assert_con(&pk, config, crypto, map, config.listener) {
+        match Self::priv_assert_con(&pk, config, crypto, map, config.listener) {
             Err(_) => Ok(None),
             Ok((conn, hdr)) => {
                 if let Some(hdr) = hdr {
@@ -131,7 +166,7 @@ impl Inner {
             map,
         } = self;
 
-        let (conn, hdr) = Self::assert_con(pk, config, crypto, map, true)?;
+        let (conn, hdr) = Self::priv_assert_con(pk, config, crypto, map, true)?;
 
         match conn {
             Conn::Cooldown(_) => {
@@ -178,7 +213,7 @@ impl Inner {
         })
     }
 
-    fn assert_con<'a>(
+    fn priv_assert_con<'a>(
         pk: &PubKey,
         config: &Config,
         crypto: &sodoken_crypto::SodokenCrypto,
@@ -258,6 +293,16 @@ impl SbdClientCrypto {
     /// Get the public key of this node.
     pub fn pub_key(&self) -> &PubKey {
         &self.pub_key
+    }
+
+    /// Assert that we are connected to a peer without sending any data.
+    pub async fn assert(&self, pk: &PubKey) -> Result<()> {
+        let mut lock = self.inner.lock().await;
+        if let Some(inner) = &mut *lock {
+            inner.assert(pk).await
+        } else {
+            Err(Error::other("closed"))
+        }
     }
 
     /// Receive a message from a peer.
