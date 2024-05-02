@@ -45,12 +45,7 @@ impl<'h> TestHelper<'h> {
     /// connect a client
     pub async fn connect_client(
         &self,
-    ) -> Result<(
-        sbd_client::SbdClient,
-        String,
-        sbd_client::PubKey,
-        sbd_client::MsgRecv,
-    )> {
+    ) -> Result<(sbd_client::SbdClient, sbd_client::MsgRecv)> {
         for addr in self.addr_list.iter() {
             if let Ok(client) = sbd_client::SbdClient::connect_config(
                 &format!("ws://{addr}"),

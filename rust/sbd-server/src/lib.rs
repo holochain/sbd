@@ -317,48 +317,42 @@ mod tests {
 
         println!("addr: {addr:?}");
 
-        let (client1, url1, pk1, mut rcv1) =
-            sbd_client::SbdClient::connect_config(
-                &format!("wss://{addr}"),
-                &sbd_client::DefaultCrypto::default(),
-                sbd_client::SbdClientConfig {
-                    allow_plain_text: true,
-                    danger_disable_certificate_check: true,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
+        let (client1, mut rcv1) = sbd_client::SbdClient::connect_config(
+            &format!("wss://{addr}"),
+            &sbd_client::DefaultCrypto::default(),
+            sbd_client::SbdClientConfig {
+                allow_plain_text: true,
+                danger_disable_certificate_check: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 
-        println!("client url1: {url1}");
+        let (client2, mut rcv2) = sbd_client::SbdClient::connect_config(
+            &format!("wss://{addr}"),
+            &sbd_client::DefaultCrypto::default(),
+            sbd_client::SbdClientConfig {
+                allow_plain_text: true,
+                danger_disable_certificate_check: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 
-        let (client2, url2, pk2, mut rcv2) =
-            sbd_client::SbdClient::connect_config(
-                &format!("wss://{addr}"),
-                &sbd_client::DefaultCrypto::default(),
-                sbd_client::SbdClientConfig {
-                    allow_plain_text: true,
-                    danger_disable_certificate_check: true,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-
-        println!("client url2: {url2}");
-
-        client1.send(&pk2, b"hello").await.unwrap();
+        client1.send(client2.pub_key(), b"hello").await.unwrap();
 
         let res_data = rcv2.recv().await.unwrap();
 
-        assert_eq!(&pk1[..], res_data.pub_key_ref());
+        assert_eq!(&client1.pub_key()[..], res_data.pub_key_ref());
         assert_eq!(&b"hello"[..], res_data.message());
 
-        client2.send(&pk1, b"world").await.unwrap();
+        client2.send(client1.pub_key(), b"world").await.unwrap();
 
         let res_data = rcv1.recv().await.unwrap();
 
-        assert_eq!(&pk2[..], res_data.pub_key_ref());
+        assert_eq!(&client2.pub_key()[..], res_data.pub_key_ref());
         assert_eq!(&b"world"[..], res_data.message());
     }
 }

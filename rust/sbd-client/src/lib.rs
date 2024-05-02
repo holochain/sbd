@@ -217,6 +217,8 @@ impl Default for SbdClientConfig {
 /// SbdClient represents a single connection to a single sbd server
 /// through which we can communicate with any number of peers on that server.
 pub struct SbdClient {
+    url: String,
+    pub_key: PubKey,
     send_buf: Arc<tokio::sync::Mutex<send_buf::SendBuf>>,
     read_task: tokio::task::JoinHandle<()>,
     write_task: tokio::task::JoinHandle<()>,
@@ -234,7 +236,7 @@ impl SbdClient {
     pub async fn connect<C: Crypto>(
         url: &str,
         crypto: &C,
-    ) -> Result<(Self, String, PubKey, MsgRecv)> {
+    ) -> Result<(Self, MsgRecv)> {
         Self::connect_config(url, crypto, SbdClientConfig::default()).await
     }
 
@@ -243,7 +245,7 @@ impl SbdClient {
         url: &str,
         crypto: &C,
         config: SbdClientConfig,
-    ) -> Result<(Self, String, PubKey, MsgRecv)> {
+    ) -> Result<(Self, MsgRecv)> {
         use base64::Engine;
         let full_url = format!(
             "{url}/{}",
@@ -329,18 +331,27 @@ impl SbdClient {
             send_buf2.lock().await.close().await;
         });
 
+        let pub_key = PubKey(Arc::new(*crypto.pub_key()));
+
         let this = Self {
+            url: full_url,
+            pub_key,
             send_buf,
             read_task,
             write_task,
         };
 
-        Ok((
-            this,
-            full_url,
-            PubKey(Arc::new(*crypto.pub_key())),
-            MsgRecv(recv_recv),
-        ))
+        Ok((this, MsgRecv(recv_recv)))
+    }
+
+    /// The full url of this client.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The pub key of this client.
+    pub fn pub_key(&self) -> &PubKey {
+        &self.pub_key
     }
 
     /// Close the connection.
@@ -353,3 +364,6 @@ impl SbdClient {
         self.send_buf.lock().await.send(peer, data).await
     }
 }
+
+#[cfg(test)]
+mod test;
