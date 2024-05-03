@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::io::{Error, Result};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 pub use sbd_client::PubKey;
 
@@ -256,16 +256,62 @@ impl Inner {
     }
 }
 
+async fn close_inner(inner: &mut Option<Inner>) {
+    if let Some(mut inner) = inner.take() {
+        inner.close().await;
+    }
+}
+
+/// Handle to receive data from the crypto connection.
+pub struct MsgRecv {
+    inner: Weak<tokio::sync::Mutex<Option<Inner>>>,
+    recv: sbd_client::MsgRecv,
+}
+
+impl MsgRecv {
+    /// Receive data from the crypto connection.
+    pub async fn recv(&mut self) -> Option<(PubKey, Vec<u8>)> {
+        loop {
+            let raw_msg = match self.recv.recv().await {
+                None => return None,
+                Some(raw_msg) => raw_msg,
+            };
+
+            if let Some(inner) = self.inner.upgrade() {
+                let mut lock = inner.lock().await;
+
+                if let Some(inner) = &mut *lock {
+                    match inner.recv(raw_msg).await {
+                        Err(_) => (),
+                        Ok(None) => continue,
+                        Ok(Some(o)) => return Some(o),
+                    }
+                } else {
+                    return None;
+                }
+
+                // the only code path leading out of the branches above
+                // is the error one where we need to close the connection
+                close_inner(&mut lock).await;
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
 /// An encrypted connection to peers through an Sbd server.
 pub struct SbdClientCrypto {
     pub_key: PubKey,
-    inner: tokio::sync::Mutex<Option<Inner>>,
-    recv: tokio::sync::Mutex<sbd_client::MsgRecv>,
+    inner: Arc<tokio::sync::Mutex<Option<Inner>>>,
 }
 
 impl SbdClientCrypto {
     /// Establish a new connection.
-    pub async fn new(url: &str, config: Arc<Config>) -> Result<Self> {
+    pub async fn new(
+        url: &str,
+        config: Arc<Config>,
+    ) -> Result<(Self, MsgRecv)> {
         let client_config = sbd_client::SbdClientConfig {
             allow_plain_text: config.allow_plain_text,
             ..Default::default()
@@ -276,18 +322,20 @@ impl SbdClientCrypto {
         let (client, recv) =
             sbd_client::SbdClient::connect_config(url, &crypto, client_config)
                 .await?;
-        let inner = tokio::sync::Mutex::new(Some(Inner {
+        let inner = Arc::new(tokio::sync::Mutex::new(Some(Inner {
             config,
             crypto,
             client,
             map: HashMap::default(),
-        }));
-        let recv = tokio::sync::Mutex::new(recv);
-        Ok(Self {
-            pub_key,
-            inner,
-            recv,
-        })
+        })));
+        let weak_inner = Arc::downgrade(&inner);
+        Ok((
+            Self { pub_key, inner },
+            MsgRecv {
+                inner: weak_inner,
+                recv,
+            },
+        ))
     }
 
     /// Get the public key of this node.
@@ -302,37 +350,6 @@ impl SbdClientCrypto {
             inner.assert(pk).await
         } else {
             Err(Error::other("closed"))
-        }
-    }
-
-    /// Receive a message from a peer.
-    pub async fn recv(&self) -> Option<(PubKey, Vec<u8>)> {
-        loop {
-            // hold this lock the whole time incase some other task
-            // is also invoking recv.
-            let mut recv_lock = self.recv.lock().await;
-
-            let raw_msg = match recv_lock.recv().await {
-                None => {
-                    self.close().await;
-                    return None;
-                }
-                Some(raw_msg) => raw_msg,
-            };
-
-            if let Some(inner) = &mut *self.inner.lock().await {
-                match inner.recv(raw_msg).await {
-                    Err(_) => {
-                        self.close().await;
-                        return None;
-                    }
-                    Ok(None) => continue,
-                    Ok(Some(o)) => return Some(o),
-                }
-            } else {
-                self.close().await;
-                return None;
-            }
         }
     }
 
@@ -364,9 +381,7 @@ impl SbdClientCrypto {
 
     /// Close the entire sbd client connection.
     pub async fn close(&self) {
-        if let Some(mut inner) = self.inner.lock().await.take() {
-            inner.close().await;
-        }
+        close_inner(&mut *self.inner.lock().await).await;
     }
 }
 

@@ -52,13 +52,13 @@ impl Test {
         Self { server }
     }
 
-    pub async fn conn(&self, c: Cfg) -> SbdClientCrypto {
+    pub async fn conn(&self, c: Cfg) -> (SbdClientCrypto, MsgRecv) {
         let c = Arc::new(c.0);
         for addr in self.server.bind_addrs() {
-            if let Ok(cli) =
+            if let Ok(r) =
                 SbdClientCrypto::new(&format!("ws://{addr}"), c.clone()).await
             {
-                return cli;
+                return r;
             }
         }
         panic!("could not connect to sbd server");
@@ -69,17 +69,17 @@ impl Test {
 async fn sanity() {
     let test = Test::new().await;
 
-    let c1 = test.conn(Cfg::d()).await;
-    let c2 = test.conn(Cfg::d()).await;
+    let (c1, mut r1) = test.conn(Cfg::d()).await;
+    let (c2, mut r2) = test.conn(Cfg::d()).await;
 
     c2.send(c1.pub_key(), b"hello").await.unwrap();
     c1.send(c2.pub_key(), b"world").await.unwrap();
 
-    let (rk, rm) = c1.recv().await.unwrap();
+    let (rk, rm) = r1.recv().await.unwrap();
     assert_eq!(c2.pub_key(), &rk);
     assert_eq!(b"hello", rm.as_slice());
 
-    let (rk, rm) = c2.recv().await.unwrap();
+    let (rk, rm) = r2.recv().await.unwrap();
     assert_eq!(c1.pub_key(), &rk);
     assert_eq!(b"world", rm.as_slice());
 }
@@ -88,7 +88,7 @@ async fn sanity() {
 async fn listener_config_works() {
     let test = Test::new().await;
 
-    let (c1, c2, c3, c4) = tokio::join!(
+    let ((c1, _r1), (c2, mut r2), (c3, _r3), (c4, mut r4)) = tokio::join!(
         test.conn(Cfg::d().no_listen()),
         test.conn(Cfg::d()),
         test.conn(Cfg::d().no_listen()),
@@ -108,7 +108,7 @@ async fn listener_config_works() {
             assert!(tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(1))
                     => false,
-                _ = c2.recv() => true,
+                _ = r2.recv() => true,
             });
         },
         async {
@@ -116,7 +116,7 @@ async fn listener_config_works() {
             assert!(tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(1))
                     => true,
-                _ = c4.recv() => false,
+                _ = r4.recv() => false,
             });
         },
     );
@@ -127,7 +127,7 @@ async fn max_connections_config_works() {
     let test = Test::new().await;
 
     // three connections that only accept one peer at a time
-    let (c1, c2, c3) = tokio::join!(
+    let ((c1, mut r1), (c2, _r2), (c3, _r3)) = tokio::join!(
         test.conn(Cfg::d().max(1)),
         test.conn(Cfg::d().max(1)),
         test.conn(Cfg::d().max(1)),
@@ -141,7 +141,7 @@ async fn max_connections_config_works() {
     .unwrap();
 
     // 1 should get 1 of the messages
-    let (got_pk, r) = c1.recv().await.unwrap();
+    let (got_pk, r) = r1.recv().await.unwrap();
     assert!(String::from_utf8_lossy(&r).starts_with("msg-"));
 
     // since 1 has an open connection, it should not be able
@@ -154,7 +154,7 @@ async fn max_connections_config_works() {
 
     // and it should not receive the second message
     assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(1), c1.recv())
+        tokio::time::timeout(std::time::Duration::from_secs(1), r1.recv())
             .await
             .is_err()
     );
@@ -164,7 +164,8 @@ async fn max_connections_config_works() {
 async fn max_msg_size() {
     let test = Test::new().await;
 
-    let (c1, c2) = tokio::join!(test.conn(Cfg::d()), test.conn(Cfg::d()),);
+    let ((c1, mut r1), (c2, _r2)) =
+        tokio::join!(test.conn(Cfg::d()), test.conn(Cfg::d()),);
 
     const MSG: &[u8] = &[0xdb; 21_000];
 
@@ -178,7 +179,7 @@ async fn max_msg_size() {
         assert_eq!(is_ok, c2.send(c1.pub_key(), &MSG[..size]).await.is_ok())
     }
 
-    let (_, r) = c1.recv().await.unwrap();
+    let (_, r) = r1.recv().await.unwrap();
     assert_eq!(&MSG[..19_951], r.as_slice());
 }
 
@@ -186,7 +187,7 @@ async fn max_msg_size() {
 async fn cooldown_config_works_from_send_side() {
     let test = Test::new().await;
 
-    let (c1, c2, c3) = tokio::join!(
+    let ((c1, mut r1), (c2, _r2), (c3, _r3)) = tokio::join!(
         test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
         test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
         test.conn(Cfg::d().cool(std::time::Duration::from_secs(5000))),
@@ -198,9 +199,9 @@ async fn cooldown_config_works_from_send_side() {
     )
     .unwrap();
 
-    let (_, r) = c1.recv().await.unwrap();
+    let (_, r) = r1.recv().await.unwrap();
     assert!(r == b"msg-a" || r == b"msg-b");
-    let (_, r) = c1.recv().await.unwrap();
+    let (_, r) = r1.recv().await.unwrap();
     assert!(r == b"msg-a" || r == b"msg-b");
 
     c2.close_peer(c1.pub_key()).await;
@@ -211,7 +212,7 @@ async fn cooldown_config_works_from_send_side() {
     assert!(c3.send(c1.pub_key(), b"msg-c").await.is_err());
     assert!(c2.send(c1.pub_key(), b"msg-d").await.is_ok());
 
-    let (_, r) = c1.recv().await.unwrap();
+    let (_, r) = r1.recv().await.unwrap();
     assert!(r == b"msg-d");
 }
 
@@ -219,7 +220,7 @@ async fn cooldown_config_works_from_send_side() {
 async fn cooldown_config_works_from_recv_side() {
     let test = Test::new().await;
 
-    let (c1, c2, c3) = tokio::join!(
+    let ((c1, mut r1), (c2, mut r2), (c3, _r3)) = tokio::join!(
         test.conn(Cfg::d().cool(std::time::Duration::from_secs(5000))),
         test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
         test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
@@ -231,9 +232,9 @@ async fn cooldown_config_works_from_recv_side() {
     )
     .unwrap();
 
-    let (_, r) = c1.recv().await.unwrap();
+    let (_, r) = r1.recv().await.unwrap();
     assert_eq!(b"msg-a", r.as_slice());
-    let (_, r) = c2.recv().await.unwrap();
+    let (_, r) = r2.recv().await.unwrap();
     assert_eq!(b"msg-b", r.as_slice());
 
     c1.close_peer(c3.pub_key()).await;
@@ -251,11 +252,11 @@ async fn cooldown_config_works_from_recv_side() {
     )
     .unwrap();
 
-    let (_, r) = c2.recv().await.unwrap();
+    let (_, r) = r2.recv().await.unwrap();
     assert_eq!(b"msg-d", r.as_slice());
 
     assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(1), c1.recv())
+        tokio::time::timeout(std::time::Duration::from_secs(1), r1.recv())
             .await
             .is_err()
     );
@@ -283,13 +284,13 @@ async fn idle_close_even_if_sending_inner(
 ) -> (std::time::Duration, bool) {
     let test = Test::new().await;
 
-    let (c1, c2) = tokio::join!(
+    let ((c1, mut r1), (c2, _r2)) = tokio::join!(
         test.conn(Cfg::d().idle(idle_dur)),
         test.conn(Cfg::d().idle(idle_dur)),
     );
 
     c2.send(c1.pub_key(), b"").await.unwrap();
-    let _ = c1.recv().await.unwrap();
+    let _ = r1.recv().await.unwrap();
 
     let mut exited_early = false;
 
@@ -300,7 +301,7 @@ async fn idle_close_even_if_sending_inner(
             exited_early = true;
             break;
         }
-        match tokio::time::timeout(std::time::Duration::from_secs(1), c1.recv())
+        match tokio::time::timeout(std::time::Duration::from_secs(1), r1.recv())
             .await
         {
             Err(_) | Ok(None) => {
