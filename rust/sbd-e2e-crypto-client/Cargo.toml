@@ -1,0 +1,13 @@
+[package]
+name = "sbd-e2e-crypto-client"
+version = "0.0.1-alpha"
+edition = "2021"
+
+[dependencies]
+sbd-client = { workspace = true }
+sodoken = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+sbd-server = { workspace = true }
+tokio = { workspace = true, features = [ "full" ] }

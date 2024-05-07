@@ -40,7 +40,7 @@ pub trait Crypto {
     fn pub_key(&self) -> &[u8; PK_SIZE];
 
     /// Sign the nonce.
-    fn sign(&self, nonce: &[u8]) -> [u8; SIG_SIZE];
+    fn sign(&self, nonce: &[u8]) -> Result<[u8; SIG_SIZE]>;
 }
 
 #[cfg(feature = "crypto")]
@@ -71,9 +71,9 @@ mod default_crypto {
             &self.0
         }
 
-        fn sign(&self, nonce: &[u8]) -> [u8; SIG_SIZE] {
+        fn sign(&self, nonce: &[u8]) -> std::io::Result<[u8; SIG_SIZE]> {
             use ed25519_dalek::Signer;
-            self.1.sign(nonce).to_bytes()
+            Ok(self.1.sign(nonce).to_bytes())
         }
     }
 }

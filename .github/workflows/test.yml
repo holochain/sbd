@@ -33,10 +33,26 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Cargo Build
-        run: cargo build --all-targets
+      - name: Install vcpkg Packages
+        if: matrix.os == 'windows-latest'
+        uses: johnwason/vcpkg-action@v6
+        id: vcpkg
+        with:
+          pkgs: libsodium
+          triplet: x64-windows-release
+          token: ${{ github.token }}
+          github-binarycache: true
 
-      - name: Cargo Test
+      - name: Cargo Test Windows
+        if: matrix.os == 'windows-latest'
         env:
           RUST_BACKTRACE: 1
-        run: cargo test -- --nocapture
+        run: |-
+          $env:SODIUM_LIB_DIR="$(pwd)\vcpkg\packages\libsodium_x64-windows-release\lib"
+          cargo build --all-targets && cargo test -- --nocapture
+
+      - name: Cargo Test
+        if: matrix.os != 'windows-latest'
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo build --all-targets && cargo test -- --nocapture

@@ -2,6 +2,7 @@
 members = [
   "rust/sbd-bench",
   "rust/sbd-client",
+  "rust/sbd-e2e-crypto-client",
   "rust/sbd-o-bahn-server-tester",
   "rust/sbd-o-bahn-client-tester",
   "rust/sbd-server",
@@ -15,6 +16,7 @@ panic = "abort"
 # workspace member deps
 sbd-bench = { version = "0.0.1-alpha", path = "rust/sbd-bench" }
 sbd-client = { version = "0.0.1-alpha", path = "rust/sbd-client" }
+sbd-e2e-crypto-client = { version = "0.0.1-alpha", path = "rust/sbd-e2e-crypto-client" }
 sbd-o-bahn-client-tester = { version = "0.0.1-alpha", path = "rust/sbd-o-bahn-client-tester" }
 sbd-o-bahn-server-tester = { version = "0.0.1-alpha", path = "rust/sbd-o-bahn-server-tester" }
 sbd-server = { version = "0.0.1-alpha", path = "rust/sbd-server" }
@@ -38,8 +40,12 @@ rustls = "0.22.4"
 rustls-native-certs = "0.7.0"
 rustls-pemfile = "2.1.2"
 slab = "0.4.9"
+sodoken = { version = "0.0.901-alpha", default-features = false }
 tempfile = "3.10.1"
 tokio = { version = "1.37.0", default-features = false }
 tokio-rustls = "0.25.0"
 tokio-tungstenite = { version = "0.21.0", default-features = false }
 webpki-roots = "0.26.1"
+
+#[patch.crates-io]
+#sodoken = { path = "../sodoken" }
