@@ -1,0 +1,21 @@
+[package]
+name = "sbd-bench"
+version = "0.0.1-alpha"
+edition = "2021"
+
+[dependencies]
+base64 = { workspace = true }
+sbd-server = { workspace = true }
+sbd-client = { workspace = true, features = [ "raw_client" ] }
+tokio = { workspace = true, features = [ "full" ] }
+
+[dev-dependencies]
+criterion = { workspace = true, features = [ "async_tokio" ] }
+
+[[bench]]
+name = "thru"
+harness = false
+
+[[bench]]
+name = "c_turnover"
+harness = false

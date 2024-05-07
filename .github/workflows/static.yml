@@ -1,0 +1,37 @@
+name: Static Analysis
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+jobs:
+  static-analysis:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [
+          ubuntu-latest,
+        ]
+        toolchain: [
+          stable,
+          1.75.0
+        ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust Toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --no-self-update
+          rustup default ${{ matrix.toolchain }}
+          rustup component add rustfmt --toolchain ${{ matrix.toolchain }}
+          rustup component add clippy --toolchain ${{ matrix.toolchain }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Make Static
+        run: make static

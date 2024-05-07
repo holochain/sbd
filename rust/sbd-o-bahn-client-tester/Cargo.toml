@@ -1,0 +1,9 @@
+[package]
+name = "sbd-o-bahn-client-tester"
+version = "0.0.1-alpha"
+edition = "2021"
+
+[dependencies]
+hex = { workspace = true }
+sbd-server = { workspace = true }
+tokio = { workspace = true, features = [ "full" ] }

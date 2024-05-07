@@ -1,0 +1,39 @@
+[package]
+name = "sbd-client"
+version = "0.0.1-alpha"
+edition = "2021"
+
+[dependencies]
+base64 = { workspace = true }
+futures = { workspace = true }
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+tokio = { workspace = true, default-features = false, features = [ "io-util", "net", "sync", "time", "rt" ] }
+tokio-rustls = { workspace = true }
+tokio-tungstenite = { workspace = true, default-features = false, features = [ "connect", "__rustls-tls" ] }
+
+
+# optional
+ed25519-dalek = { workspace = true, features = [ "rand_core" ], optional = true }
+rand = { workspace = true, optional = true }
+
+[target.'cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))'.dependencies]
+webpki-roots = { workspace = true }
+
+[dev-dependencies]
+escargot = { workspace = true, features = [ "print" ] }
+hex = { workspace = true }
+tokio = { workspace = true, features = [ "full" ] }
+sbd-server = { workspace = true }
+
+[features]
+default = [ "crypto" ]
+
+# built-in signing ability
+crypto = [ "dep:ed25519-dalek", "dep:rand" ]
+
+# expose the raw client (used in server test suite)
+raw_client = []
+
+[package.metadata.docs.rs]
+all-features = true
