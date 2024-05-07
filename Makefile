@@ -41,10 +41,10 @@ publish:
 	esac; \
 	export VER="v$$(grep version $${MANIFEST} | head -1 | cut -d ' ' -f 3 | cut -d \" -f 2)"; \
 	echo "publish $(crate) $${MANIFEST} $${VER}"; \
-	echo git diff --exit-code; \
-	cargo publish --dry-run --allow-dirty --manifest-path $${MANIFEST}; \
-	echo git tag -a "$(crate)-$${VER}" -m "$(crate)-$${VER}"; \
-	echo git push --tags;
+	git diff --exit-code; \
+	cargo publish --manifest-path $${MANIFEST}; \
+	git tag -a "$(crate)-$${VER}" -m "$(crate)-$${VER}"; \
+	git push --tags;
 
 test: static
 	cargo build --all-targets
