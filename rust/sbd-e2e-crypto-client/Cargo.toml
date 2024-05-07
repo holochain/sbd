@@ -1,5 +1,12 @@
 [package]
 name = "sbd-e2e-crypto-client"
+description = "simple websocket-based e2e encrypted message relay client"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/holochain/sbd"
+documentation = "https://docs.rs/sbd-e2e-crypto-client"
+authors = ["Holochain Core Dev Team <devcore@holochain.org>"]
+keywords = ["holochain", "holo", "p2p", "networking"]
+categories = ["network-programming"]
 version = "0.0.1-alpha"
 edition = "2021"
 
