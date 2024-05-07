@@ -19,6 +19,9 @@ const HDR_SIZE: usize = PK_SIZE;
 /// defined by sbd spec
 const NONCE_SIZE: usize = 32;
 
+/// defined by sbd spec
+const CMD_PREFIX: &[u8; 28] = &[0; 28];
+
 const F_LIMIT_BYTE_NANOS: &[u8] = b"lbrt";
 const F_LIMIT_IDLE_MILLIS: &[u8] = b"lidl";
 const F_AUTH_REQ: &[u8] = b"areq";
@@ -97,9 +100,6 @@ impl std::fmt::Debug for PubKey {
         f.write_str(&out)
     }
 }
-
-/// defined by sbd spec
-const CMD_PREFIX: &[u8; 28] = &[0; 28];
 
 enum MsgType<'t> {
     Msg {
