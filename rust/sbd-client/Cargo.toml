@@ -1,6 +1,13 @@
 [package]
 name = "sbd-client"
 version = "0.0.1-alpha"
+description = "simple websocket-based message relay client"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/holochain/sbd"
+documentation = "https://docs.rs/sbd-client"
+authors = ["Holochain Core Dev Team <devcore@holochain.org>"]
+keywords = ["holochain", "holo", "p2p", "networking"]
+categories = ["network-programming"]
 edition = "2021"
 
 [dependencies]
@@ -24,7 +31,9 @@ webpki-roots = { workspace = true }
 escargot = { workspace = true, features = [ "print" ] }
 hex = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
-sbd-server = { workspace = true }
+# don't use workspace, because that has a version
+# use path only so we can cargo publish without circular dep problems
+sbd-server = { path = "../sbd-server" }
 
 [features]
 default = [ "crypto" ]
