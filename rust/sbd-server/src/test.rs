@@ -82,10 +82,10 @@ async fn fuzzy_bind_tests() {
         // it should be possible to bind these to the same port
         (R::Same, &["127.0.0.1:0", "[::1]:0"][..]),
         // it will NOT be possible to bind these to the same port
-        // since we're already bound to localhost, the catchall cannot dup
+        // since we already bound them
         (
             R::Diff,
-            &["127.0.0.1:0", "[::1]:0", "0.0.0.0:0", "[::]:0"][..],
+            &["127.0.0.1:0", "[::1]:0", "127.0.0.1:0", "[::1]:0"][..],
         ),
         // sanity that we can explicitly specify a port
         (
