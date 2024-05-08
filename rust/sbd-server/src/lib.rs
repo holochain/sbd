@@ -196,6 +196,18 @@ async fn check_accept_connection(
     .await;
 }
 
+async fn bind_all<I: IntoIterator<Item = std::net::SocketAddr>>(
+    i: I,
+) -> Vec<tokio::net::TcpListener> {
+    let mut listeners = Vec::new();
+    for a in i.into_iter() {
+        if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
+            listeners.push(tcp);
+        }
+    }
+    listeners
+}
+
 impl SbdServer {
     /// Construct a new running sbd server with the provided config.
     pub async fn new(config: Arc<Config>) -> Result<Self> {
@@ -278,23 +290,9 @@ impl SbdServer {
                 }
 
                 // just use whatever we can get
-                let mut listeners = Vec::new();
-                for a in bind_port_zero {
-                    if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
-                        listeners.push(tcp);
-                    }
-                }
-                listeners
+                bind_all(bind_port_zero).await
             },
-            async {
-                let mut listeners = Vec::new();
-                for a in bind_explicit_port {
-                    if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
-                        listeners.push(tcp);
-                    }
-                }
-                listeners
-            },
+            async { bind_all(bind_explicit_port).await },
         );
 
         listeners.append(&mut l2);
