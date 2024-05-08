@@ -1,6 +1,6 @@
 # sbd Makefile
 
-.PHONY: all publish-all publish test static
+.PHONY: all publish-all publish bump test static
 
 SHELL = /usr/bin/env sh -eu
 
@@ -45,6 +45,13 @@ publish:
 	cargo publish --manifest-path $${MANIFEST}; \
 	git tag -a "$(crate)-$${VER}" -m "$(crate)-$${VER}"; \
 	git push --tags;
+
+bump:
+	@if [ "$(ver)x" = "x" ]; then \
+		echo "USAGE: make bump ver=0.0.2-alpha"; \
+		exit 1; \
+	fi
+	sed -i 's/^\(sbd[^=]*= { \|\)version = "[^"]*"/\1version = "$(ver)"/g' $$(find . -name Cargo.toml)
 
 test: static
 	cargo build --all-targets
