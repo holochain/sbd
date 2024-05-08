@@ -25,12 +25,12 @@ pub struct Config {
     #[arg(long)]
     pub priv_key_pem_file: Option<std::path::PathBuf>,
 
-    /// Bind to this interface and port.
+    /// Bind to this interface and port. If multiple bindings specify port
+    /// zero, the server will attempt to bind the same port to each interface.
+    /// If it cannot, it will allow all the ports to be different.
     /// Can be specified more than once.
-    /// E.g. `--bind 0.0.0.0:0`
-    /// E.g. `--bind [::]:0`
-    /// E.g. `--bind 192.168.0.10:443`
-    #[arg(long, verbatim_doc_comment)]
+    /// E.g. `--bind 127.0.0.1:0 --bind [::1]:0 --bind 192.168.0.10:443`.
+    #[arg(long)]
     pub bind: Vec<String>,
 
     #[cfg(feature = "unstable")]
