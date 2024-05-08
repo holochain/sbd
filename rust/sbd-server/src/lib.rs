@@ -233,11 +233,78 @@ impl SbdServer {
         // read this as a prioritization of existing connections over incoming
         let connect_limit = Arc::new(tokio::sync::Semaphore::new(1024));
 
-        let weak_cslot = cslot.weak();
+        let mut bind_port_zero = Vec::new();
+        let mut bind_explicit_port = Vec::new();
+
         for bind in config.bind.iter() {
             let a: std::net::SocketAddr = bind.parse().map_err(Error::other)?;
 
-            let tcp = tokio::net::TcpListener::bind(a).await?;
+            if a.port() == 0 {
+                bind_port_zero.push(a);
+            } else {
+                bind_explicit_port.push(a);
+            }
+        }
+
+        let (mut listeners, mut l2) = tokio::join!(
+            async {
+                // bail if there are no zero port bindings
+                if bind_port_zero.is_empty() {
+                    return Vec::new();
+                }
+
+                // try twice to re-use port
+                'top: for _ in 0..2 {
+                    let mut listeners = Vec::new();
+
+                    let mut a_iter = bind_port_zero.iter();
+
+                    let a = a_iter.next().unwrap();
+                    if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
+                        let port = tcp.local_addr().unwrap().port();
+                        listeners.push(tcp);
+
+                        for a in a_iter {
+                            let mut a = *a;
+                            a.set_port(port);
+                            match tokio::net::TcpListener::bind(a).await {
+                                Err(_) => continue 'top,
+                                Ok(tcp) => listeners.push(tcp),
+                            }
+                        }
+
+                        return listeners;
+                    }
+                }
+
+                // just use whatever we can get
+                let mut listeners = Vec::new();
+                for a in bind_port_zero {
+                    if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
+                        listeners.push(tcp);
+                    }
+                }
+                listeners
+            },
+            async {
+                let mut listeners = Vec::new();
+                for a in bind_explicit_port {
+                    if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
+                        listeners.push(tcp);
+                    }
+                }
+                listeners
+            },
+        );
+
+        listeners.append(&mut l2);
+
+        if listeners.is_empty() {
+            return Err(Error::other("failed to bind any listeners"));
+        }
+
+        let weak_cslot = cslot.weak();
+        for tcp in listeners {
             bind_addrs.push(tcp.local_addr()?);
 
             let tls_config = tls_config.clone();
@@ -286,73 +353,4 @@ impl SbdServer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn tls_sanity() {
-        let tmp = tempfile::tempdir().unwrap();
-        let tmp_dir = tmp.path().to_owned();
-        let rcgen::CertifiedKey { cert, key_pair } =
-            rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
-                .unwrap();
-        let mut cert_path = tmp_dir.clone();
-        cert_path.push("cert.pem");
-        tokio::fs::write(&cert_path, cert.pem()).await.unwrap();
-        let mut key_path = tmp_dir.clone();
-        key_path.push("key.pem");
-        tokio::fs::write(&key_path, key_pair.serialize_pem())
-            .await
-            .unwrap();
-
-        let mut config = Config::default();
-        config.cert_pem_file = Some(cert_path);
-        config.priv_key_pem_file = Some(key_path);
-        config.bind.push("127.0.0.1:0".into());
-        println!("{config:?}");
-
-        let server = SbdServer::new(Arc::new(config)).await.unwrap();
-
-        let addr = server.bind_addrs()[0].clone();
-
-        println!("addr: {addr:?}");
-
-        let (client1, mut rcv1) = sbd_client::SbdClient::connect_config(
-            &format!("wss://{addr}"),
-            &sbd_client::DefaultCrypto::default(),
-            sbd_client::SbdClientConfig {
-                allow_plain_text: true,
-                danger_disable_certificate_check: true,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-
-        let (client2, mut rcv2) = sbd_client::SbdClient::connect_config(
-            &format!("wss://{addr}"),
-            &sbd_client::DefaultCrypto::default(),
-            sbd_client::SbdClientConfig {
-                allow_plain_text: true,
-                danger_disable_certificate_check: true,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-
-        client1.send(client2.pub_key(), b"hello").await.unwrap();
-
-        let res_data = rcv2.recv().await.unwrap();
-
-        assert_eq!(&client1.pub_key()[..], res_data.pub_key_ref());
-        assert_eq!(&b"hello"[..], res_data.message());
-
-        client2.send(client1.pub_key(), b"world").await.unwrap();
-
-        let res_data = rcv1.recv().await.unwrap();
-
-        assert_eq!(&client2.pub_key()[..], res_data.pub_key_ref());
-        assert_eq!(&b"world"[..], res_data.message());
-    }
-}
+mod test;
