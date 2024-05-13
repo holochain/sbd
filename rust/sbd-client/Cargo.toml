@@ -1,6 +1,6 @@
 [package]
 name = "sbd-client"
-version = "0.0.2-alpha"
+version = "0.0.3-alpha"
 description = "simple websocket-based message relay client"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/holochain/sbd"
@@ -23,6 +23,7 @@ tokio-tungstenite = { workspace = true, default-features = false, features = [ "
 # optional
 ed25519-dalek = { workspace = true, features = [ "rand_core" ], optional = true }
 rand = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
 
 [target.'cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))'.dependencies]
 webpki-roots = { workspace = true }
@@ -43,6 +44,9 @@ crypto = [ "dep:ed25519-dalek", "dep:rand" ]
 
 # expose the raw client (used in server test suite)
 raw_client = []
+
+# force webpki roots instead of native certs
+force_webpki_roots = [ "dep:webpki-roots" ]
 
 [package.metadata.docs.rs]
 all-features = true
