@@ -18,6 +18,7 @@ async fn get_client(
             max_message_size: 100,
             allow_plain_text: true,
             danger_disable_certificate_check: false,
+            headers: Vec::new(),
         })
         .connect()
         .await

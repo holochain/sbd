@@ -18,6 +18,7 @@ async fn raw_connect(
             max_message_size: 1000,
             allow_plain_text: true,
             danger_disable_certificate_check: false,
+            headers: Vec::new(),
         })
         .connect()
         .await
@@ -33,3 +34,6 @@ pub use thru::*;
 
 mod c_turnover;
 pub use c_turnover::*;
+
+mod c_count_scale;
+pub use c_count_scale::*;

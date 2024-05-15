@@ -14,11 +14,13 @@ pub struct WsRawConnect {
     /// Setting this to `true` allows `ws://` scheme.
     pub allow_plain_text: bool,
 
-    #[allow(unused_variables)]
     /// Setting this to `true` disables certificate verification on `wss://`
     /// scheme. WARNING: this is a dangerous configuration and should not
     /// be used outside of testing (i.e. self-signed tls certificates).
     pub danger_disable_certificate_check: bool,
+
+    /// Set any custom http headers to send with the websocket connect.
+    pub headers: Vec<(String, String)>,
 }
 
 impl WsRawConnect {
@@ -29,9 +31,21 @@ impl WsRawConnect {
             max_message_size,
             allow_plain_text,
             danger_disable_certificate_check,
+            headers,
         } = self;
 
-        let request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(full_url).map_err(Error::other)?;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = IntoClientRequest::into_client_request(full_url)
+            .map_err(Error::other)?;
+
+        for (k, v) in headers {
+            use tokio_tungstenite::tungstenite::http::header::*;
+            let k =
+                HeaderName::from_bytes(k.as_bytes()).map_err(Error::other)?;
+            let v =
+                HeaderValue::from_bytes(v.as_bytes()).map_err(Error::other)?;
+            request.headers_mut().insert(k, v);
+        }
 
         let scheme_ws = request.uri().scheme_str() == Some("ws");
         let scheme_wss = request.uri().scheme_str() == Some("wss");
