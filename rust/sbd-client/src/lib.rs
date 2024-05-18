@@ -190,7 +190,7 @@ impl MsgRecv {
 }
 
 /// Configuration for connecting an SbdClient.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct SbdClientConfig {
     /// Outgoing message buffer size.
     pub out_buffer_size: usize,
@@ -202,6 +202,9 @@ pub struct SbdClientConfig {
     /// scheme. WARNING: this is a dangerous configuration and should not
     /// be used outside of testing (i.e. self-signed tls certificates).
     pub danger_disable_certificate_check: bool,
+
+    /// Set any custom http headers to send with the websocket connect.
+    pub headers: Vec<(String, String)>,
 }
 
 impl Default for SbdClientConfig {
@@ -210,6 +213,7 @@ impl Default for SbdClientConfig {
             out_buffer_size: MAX_MSG_SIZE * 8,
             allow_plain_text: false,
             danger_disable_certificate_check: false,
+            headers: Vec::new(),
         }
     }
 }
@@ -259,6 +263,7 @@ impl SbdClient {
             allow_plain_text: config.allow_plain_text,
             danger_disable_certificate_check: config
                 .danger_disable_certificate_check,
+            headers: config.headers,
         }
         .connect()
         .await?;
