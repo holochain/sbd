@@ -42,32 +42,23 @@ impl TlsConfig {
         cert: &std::path::Path,
         pk: &std::path::Path,
     ) -> std::io::Result<Arc<rustls::server::ServerConfig>> {
-        use rustls_pemfile::Item::*;
-
         let cert = tokio::fs::read(cert).await?;
         let pk = tokio::fs::read(pk).await?;
 
-        let cert = match rustls_pemfile::read_one_from_slice(&cert) {
-            Ok(Some((X509Certificate(cert), _))) => cert,
-            _ => return Err(std::io::Error::other("error reading tls cert")),
-        };
-        let pk = match rustls_pemfile::read_one_from_slice(&pk) {
-            Ok(Some((Pkcs1Key(pk), _))) => {
-                rustls::pki_types::PrivateKeyDer::Pkcs1(pk)
-            }
-            Ok(Some((Sec1Key(pk), _))) => {
-                rustls::pki_types::PrivateKeyDer::Sec1(pk)
-            }
-            Ok(Some((Pkcs8Key(pk), _))) => {
-                rustls::pki_types::PrivateKeyDer::Pkcs8(pk)
-            }
-            _ => return Err(std::io::Error::other("error reading priv key")),
-        };
+        let mut certs = Vec::new();
+        for cert in rustls_pemfile::certs(&mut std::io::Cursor::new(&cert)) {
+            certs.push(cert?);
+        }
+
+        let pk = rustls_pemfile::private_key(&mut std::io::Cursor::new(&pk))?
+            .ok_or_else(|| {
+            std::io::Error::other("error reading priv key")
+        })?;
 
         Ok(std::sync::Arc::new(
             rustls::server::ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(vec![cert], pk)
+                .with_single_cert(certs, pk)
                 .map_err(std::io::Error::other)?,
         ))
     }
