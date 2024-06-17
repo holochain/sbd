@@ -18,6 +18,7 @@ rustls-native-certs = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [ "io-util", "net", "sync", "time", "rt" ] }
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true, default-features = false, features = [ "connect", "__rustls-tls" ] }
+tracing = { workspace = true }
 
 # optional
 ed25519-dalek = { workspace = true, features = [ "rand_core" ], optional = true }

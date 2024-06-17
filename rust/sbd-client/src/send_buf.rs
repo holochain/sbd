@@ -3,6 +3,7 @@ use super::*;
 use std::collections::VecDeque;
 
 pub struct SendBuf {
+    pub full_url: String,
     pub ws: raw_client::WsRawSend,
     pub buf: VecDeque<Vec<u8>>,
     pub out_buffer_size: usize,
@@ -16,13 +17,24 @@ pub struct SendBuf {
 impl SendBuf {
     /// construct a new send buf
     pub fn new(
+        full_url: String,
         ws: raw_client::WsRawSend,
         out_buffer_size: usize,
         limit_rate: u64,
         idle_keepalive: std::time::Duration,
         pre_sent_bytes: usize,
     ) -> Self {
+        let kbps = (8_000_000.0 / limit_rate as f64) as u64;
+        tracing::debug!(
+            target: "NETAUDIT",
+            full_url,
+            kbps,
+            m = "sbd-client",
+            a = "initial_rate_limit",
+        );
+
         let mut this = Self {
+            full_url,
             ws,
             buf: VecDeque::default(),
             out_buffer_size,
@@ -59,6 +71,16 @@ impl SendBuf {
                 + (MAX_MSG_SIZE as u64 * self.limit_rate);
         }
         self.limit_rate = limit;
+        let kbps = (8_000_000.0 / limit as f64) as u64;
+        let next_send_s = self.next_send_at as f64 / 1_000_000_000.0;
+        tracing::debug!(
+            target: "NETAUDIT",
+            full_url = self.full_url,
+            kbps,
+            next_send_s,
+            m = "sbd-client",
+            a = "new_rate_limit",
+        );
     }
 
     /// If we need to wait before taking the next step, this
