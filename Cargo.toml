@@ -14,12 +14,12 @@ panic = "abort"
 
 [workspace.dependencies]
 # workspace member deps
-sbd-bench = { version = "0.0.4-alpha", path = "rust/sbd-bench" }
-sbd-client = { version = "0.0.4-alpha", path = "rust/sbd-client" }
-sbd-e2e-crypto-client = { version = "0.0.4-alpha", path = "rust/sbd-e2e-crypto-client" }
-sbd-o-bahn-client-tester = { version = "0.0.4-alpha", path = "rust/sbd-o-bahn-client-tester" }
-sbd-o-bahn-server-tester = { version = "0.0.4-alpha", path = "rust/sbd-o-bahn-server-tester" }
-sbd-server = { version = "0.0.4-alpha", path = "rust/sbd-server" }
+sbd-bench = { version = "0.0.5-alpha", path = "rust/sbd-bench" }
+sbd-client = { version = "0.0.5-alpha", path = "rust/sbd-client" }
+sbd-e2e-crypto-client = { version = "0.0.5-alpha", path = "rust/sbd-e2e-crypto-client" }
+sbd-o-bahn-client-tester = { version = "0.0.5-alpha", path = "rust/sbd-o-bahn-client-tester" }
+sbd-o-bahn-server-tester = { version = "0.0.5-alpha", path = "rust/sbd-o-bahn-server-tester" }
+sbd-server = { version = "0.0.5-alpha", path = "rust/sbd-server" }
 # crate deps
 anstyle = "1.0.6"
 base64 = "0.22.0"
@@ -45,6 +45,7 @@ tempfile = "3.10.1"
 tokio = { version = "1.37.0", default-features = false }
 tokio-rustls = "0.25.0"
 tokio-tungstenite = { version = "0.21.0", default-features = false }
+tracing = "0.1.40"
 webpki-roots = "0.26.1"
 
 #[patch.crates-io]

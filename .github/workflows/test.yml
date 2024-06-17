@@ -38,9 +38,9 @@ jobs:
         uses: johnwason/vcpkg-action@v6
         id: vcpkg
         with:
-          pkgs: libsodium
           triplet: x64-windows-release
           token: ${{ github.token }}
+          manifest-dir: ${{ github.workspace }}/.github/manifest
           github-binarycache: true
 
       - name: Cargo Test Windows

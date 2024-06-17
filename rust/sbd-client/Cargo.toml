@@ -1,6 +1,6 @@
 [package]
 name = "sbd-client"
-version = "0.0.4-alpha"
+version = "0.0.5-alpha"
 description = "simple websocket-based message relay client"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/holochain/sbd"
@@ -18,7 +18,7 @@ rustls-native-certs = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [ "io-util", "net", "sync", "time", "rt" ] }
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true, default-features = false, features = [ "connect", "__rustls-tls" ] }
-
+tracing = { workspace = true }
 
 # optional
 ed25519-dalek = { workspace = true, features = [ "rand_core" ], optional = true }
@@ -31,10 +31,10 @@ webpki-roots = { workspace = true }
 [dev-dependencies]
 escargot = { workspace = true, features = [ "print" ] }
 hex = { workspace = true }
-tokio = { workspace = true, features = [ "full" ] }
 # don't use workspace, because that has a version
 # use path only so we can cargo publish without circular dep problems
 sbd-server = { path = "../sbd-server" }
+tokio = { workspace = true, features = [ "full" ] }
 
 [features]
 default = [ "crypto" ]

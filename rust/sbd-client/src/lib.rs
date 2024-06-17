@@ -276,6 +276,7 @@ impl SbdClient {
             .await?;
 
         let send_buf = send_buf::SendBuf::new(
+            full_url.clone(),
             send,
             config.out_buffer_size,
             (limit_byte_nanos as f64 * 1.1) as u64,

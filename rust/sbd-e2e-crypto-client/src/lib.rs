@@ -66,16 +66,25 @@ struct Inner {
     map: HashMap<PubKey, Conn>,
 }
 
+fn do_close_peer(pk: &PubKey, conn: &mut Conn, cooldown: std::time::Duration) {
+    tracing::debug!(
+        target: "NETAUDIT",
+        pub_key = ?pk,
+        cooldown_s = cooldown.as_secs_f64(),
+        m = "sbd-e2e-crypto-client",
+        a = "close_peer",
+    );
+    *conn = Conn::Cooldown(tokio::time::Instant::now() + cooldown);
+}
+
 impl Inner {
     pub async fn close(&mut self) {
         self.client.close().await;
     }
 
-    pub async fn close_peer(&mut self, pk: &PubKey) {
+    pub fn close_peer(&mut self, pk: &PubKey) {
         if let Some(conn) = self.map.get_mut(pk) {
-            *conn = Conn::Cooldown(
-                tokio::time::Instant::now() + self.config.cooldown,
-            );
+            do_close_peer(pk, conn, self.config.cooldown);
         }
     }
 
@@ -103,9 +112,7 @@ impl Inner {
                 }
                 .await
                 {
-                    *conn = Conn::Cooldown(
-                        tokio::time::Instant::now() + config.cooldown,
-                    );
+                    do_close_peer(pk, conn, config.cooldown);
                     Err(err)
                 } else {
                     Ok(())
@@ -143,10 +150,7 @@ impl Inner {
 
                         match dec.decrypt(msg.message()) {
                             Err(_) => {
-                                *conn = Conn::Cooldown(
-                                    tokio::time::Instant::now()
-                                        + config.cooldown,
-                                );
+                                do_close_peer(&pk, conn, config.cooldown);
                                 Ok(None)
                             }
                             Ok(None) => Ok(None),
@@ -182,9 +186,7 @@ impl Inner {
                 }
                 .await
                 {
-                    *conn = Conn::Cooldown(
-                        tokio::time::Instant::now() + config.cooldown,
-                    );
+                    do_close_peer(pk, conn, config.cooldown);
                     Err(err)
                 } else {
                     Ok(())
@@ -196,12 +198,10 @@ impl Inner {
     fn prune(config: &Config, map: &mut HashMap<PubKey, Conn>) {
         let now = tokio::time::Instant::now();
 
-        map.retain(|_, c| {
+        map.retain(|pk, c| {
             if let Conn::Active { last_active, .. } = c {
                 if now - *last_active > config.max_idle {
-                    *c = Conn::Cooldown(
-                        tokio::time::Instant::now() + config.cooldown,
-                    );
+                    do_close_peer(pk, c, config.cooldown);
                 }
             }
 
@@ -240,8 +240,20 @@ impl Inner {
                     return Err(Error::other("ignore"));
                 }
                 if len >= config.max_connections {
+                    tracing::debug!(
+                        target: "NETAUDIT",
+                        pub_key = ?pk,
+                        m = "sbd-e2e-crypto-client",
+                        "cannot open: too many connections",
+                    );
                     return Err(Error::other("too many connections"));
                 }
+                tracing::debug!(
+                    target: "NETAUDIT",
+                    pub_key = ?pk,
+                    m = "sbd-e2e-crypto-client",
+                    a = "open_peer",
+                );
                 let (enc, hdr, dec) = crypto.new_enc(pk)?;
                 Ok((
                     e.insert(Conn::Active {
@@ -375,7 +387,7 @@ impl SbdClientCrypto {
     /// Close a connection to a specific peer.
     pub async fn close_peer(&self, pk: &PubKey) {
         if let Some(inner) = self.inner.lock().await.as_mut() {
-            inner.close_peer(pk).await;
+            inner.close_peer(pk);
         }
     }
 
