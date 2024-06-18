@@ -75,7 +75,6 @@ export default {
       const method = request.method;
       const url = new URL(request.url);
 
-      // @ts-expect-error // cf typescript bug //
       const path: string = url.pathname;
 
       // TODO - check headers for content-length / chunked encoding and reject?
@@ -148,7 +147,6 @@ export class DoSignal implements DurableObject {
       try {
         const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
         const url = new URL(request.url);
-        // @ts-expect-error // cf typescript bug //
         const path: string = url.pathname;
 
         if (path === '/fwd') {
