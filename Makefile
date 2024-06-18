@@ -56,8 +56,13 @@ bump:
 test: static
 	cargo build --all-targets
 	RUST_BACKTRACE=1 cargo test
+	cd ts/sbd-server && npm ci
+	cd ts/sbd-server && npm run test:unit
 
 static:
 	cargo fmt -- --check
 	cargo clippy -- -Dwarnings
+	cd ts/sbd-server && npm ci
+	cd ts/sbd-server && npm run test:fmt
+	cd ts/sbd-server && npm run test:type
 	@if [ "${CI}x" != "x" ]; then git diff --exit-code; fi
