@@ -1,10 +1,10 @@
 # sbd Makefile
 
-.PHONY: all publish-all publish bump test static
+.PHONY: default publish-all publish bump test static
 
 SHELL = /usr/bin/env sh -eu
 
-all: test
+default: static test
 
 publish-all:
 	$(MAKE) publish crate=sbd-client
@@ -53,7 +53,7 @@ bump:
 	fi
 	sed -i 's/^\(sbd[^=]*= { \|\)version = "[^"]*"/\1version = "$(ver)"/g' $$(find . -name Cargo.toml)
 
-test: static
+test:
 	cargo build --all-targets
 	RUST_BACKTRACE=1 cargo test
 	cd ts/sbd-server && npm ci
