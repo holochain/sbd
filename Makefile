@@ -58,6 +58,7 @@ test:
 	RUST_BACKTRACE=1 cargo test
 	cd ts/sbd-server && npm ci
 	cd ts/sbd-server && npm run test:unit
+	cd ts/sbd-server && cargo run --manifest-path ../../rust/sbd-o-bahn-server-tester/Cargo.toml -- ./server-o-bahn-runner.mjs
 
 static:
 	cargo fmt -- --check

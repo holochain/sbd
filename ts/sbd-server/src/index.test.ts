@@ -117,7 +117,9 @@ describe('Worker', () => {
   let addr: string;
 
   beforeAll(async () => {
-    worker = await unstable_dev('src/index.ts');
+    worker = await unstable_dev('src/index.ts', {
+      experimental: { disableExperimentalWarning: true },
+    });
     addr = worker.address + ':' + worker.port;
   });
 
