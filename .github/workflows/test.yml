@@ -63,3 +63,7 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: make test
+
+      - name: Cf Test
+        if: matrix.os == 'ubuntu-latest'
+        run: make cf-test

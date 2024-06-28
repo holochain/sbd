@@ -1,6 +1,6 @@
 # sbd Makefile
 
-.PHONY: default publish-all publish bump test static
+.PHONY: default publish-all publish bump test cf-test static
 
 SHELL = /usr/bin/env sh -eu
 
@@ -56,6 +56,8 @@ bump:
 test:
 	cargo build --all-targets
 	RUST_BACKTRACE=1 cargo test
+
+cf-test:
 	cd ts/sbd-server && npm ci
 	cd ts/sbd-server && npm run test:unit
 	cd ts/sbd-server && cargo run --manifest-path ../../rust/sbd-o-bahn-server-tester/Cargo.toml -- node ./server-o-bahn-runner.mjs
