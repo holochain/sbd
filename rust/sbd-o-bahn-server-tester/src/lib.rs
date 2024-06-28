@@ -28,7 +28,7 @@ pub struct Report {
 }
 
 /// Run the test suite.
-pub async fn run<S: AsRef<std::ffi::OsStr>>(cmd: S) -> Report {
+pub async fn run<S: AsRef<std::ffi::OsStr>>(cmd: Vec<S>) -> Report {
     let mut server = Server::spawn(cmd).await.unwrap();
     let addrs = server.start().await;
 
@@ -44,8 +44,12 @@ struct Server {
 }
 
 impl Server {
-    pub async fn spawn<S: AsRef<std::ffi::OsStr>>(cmd: S) -> Result<Self> {
-        let mut cmd = tokio::process::Command::new(cmd);
+    pub async fn spawn<S: AsRef<std::ffi::OsStr>>(
+        mut args: Vec<S>,
+    ) -> Result<Self> {
+        let prog = args.remove(0);
+        let mut cmd = tokio::process::Command::new(prog);
+        cmd.args(args);
         cmd.kill_on_drop(true)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped());

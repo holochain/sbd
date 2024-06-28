@@ -1,11 +1,9 @@
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    let mut args = std::env::args_os();
-    args.next().unwrap();
-    let result = sbd_o_bahn_server_tester::run(
-        args.next().expect("Expected Sbd Server Suite Runner"),
-    )
-    .await;
+    let mut args = std::env::args_os().collect::<Vec<_>>();
+    // remove the "self" arg
+    args.remove(0);
+    let result = sbd_o_bahn_server_tester::run(args).await;
     println!("{result:#?}");
     if !result.failed.is_empty() {
         panic!("TEST FAILED");
