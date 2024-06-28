@@ -67,6 +67,8 @@ nodeCleanup((_code, sig) => {
   kill(pid, sig)
 })
 
+stdin.resume()
+
 const rl = createInterface({
   input: stdin,
 })
