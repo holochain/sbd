@@ -17,12 +17,8 @@ class Srv {
   }
 
   static async spawn() {
-    let procName = 'npx'
-    if (platform.startsWith('win')) {
-      procName = 'npx.exe'
-    }
-    const proc = spawn(procName, [
-      'wrangler',
+    const proc = spawn('node', [
+      './node_modules/.bin/wrangler',
       'dev',
       '--show-interactive-dev-session',
       'false',
