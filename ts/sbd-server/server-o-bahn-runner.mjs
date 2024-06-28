@@ -2,7 +2,8 @@
 
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { stdin, exit } from 'node:process'
+import { stdin, exit, platform, pid, kill } from 'node:process'
+import nodeCleanup from 'node-cleanup'
 
 const reReady = new RegExp('^.*Ready on http:\/\/(.*)$', 'm')
 
@@ -16,7 +17,11 @@ class Srv {
   }
 
   static async spawn() {
-    const proc = spawn('npx', [
+    let procName = 'npx'
+    if (platform.startsWith('win')) {
+      procName = 'npx.exe'
+    }
+    const proc = spawn(procName, [
       'wrangler',
       'dev',
       '--show-interactive-dev-session',
@@ -50,19 +55,21 @@ class Srv {
     return this.#addr
   }
 
-  async kill() {
-    if (!this.#proc.kill('SIGTERM')) {
-      await new Promise((r, _) => {
-        setTimeout(r, 1000)
-      })
-      this.#proc.kill('SIGKILL')
-    }
+  kill() {
+    this.#proc.kill('SIGKILL')
   }
 }
 
 console.log('CMD/READY')
 
 let _glb_srv = null
+
+nodeCleanup((_code, sig) => {
+  if (_glb_srv) {
+    _glb_srv.kill()
+  }
+  kill(pid, sig)
+})
 
 const rl = createInterface({
   input: stdin,
@@ -71,13 +78,16 @@ const rl = createInterface({
 for await (const line of rl) {
   if (line === 'CMD/START') {
     if (_glb_srv) {
-      await _glb_srv.kill()
+      _glb_srv.kill()
     }
     _glb_srv = await Srv.spawn()
     const addr = _glb_srv.addr()
     console.log(`CMD/START/${addr}`)
   } else {
     console.error('INVALID CMD: ' + line)
+    if (_glb_srv) {
+      _glb_srv.kill()
+    }
     exit(127)
   }
 }

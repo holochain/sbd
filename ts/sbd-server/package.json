@@ -12,13 +12,12 @@
     "test": "npm run test:fmt && npm run test:type && npm run test:unit"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240614.0",
-    "@types/ws": "^8.5.10",
+    "@cloudflare/workers-types": "^4.20240620.0",
+    "node-cleanup": "^2.1.2",
     "prettier": "^3.3.2",
-    "typescript": "^5.4.5",
+    "typescript": "^5.5.2",
     "vitest": "^1.6.0",
-    "wrangler": "^3.61.0",
-    "ws": "^8.17.1"
+    "wrangler": "^3.62.0"
   },
   "dependencies": {
     "@noble/ed25519": "^2.1.0",

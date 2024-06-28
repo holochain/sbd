@@ -1,6 +1,6 @@
-name = "tx5-signal-cf"
+name = "sbd-signal"
 main = "src/index.ts"
-compatibility_date = "2024-06-18"
+compatibility_date = "2024-06-03"
 
 [[durable_objects.bindings]]
 name = "SIGNAL"

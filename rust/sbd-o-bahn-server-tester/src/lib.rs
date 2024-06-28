@@ -49,8 +49,8 @@ impl Server {
     ) -> Result<Self> {
         let prog = args.remove(0);
         let mut cmd = tokio::process::Command::new(prog);
-        cmd.args(args);
-        cmd.kill_on_drop(true)
+        cmd.args(args)
+            .kill_on_drop(true)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped());
 
