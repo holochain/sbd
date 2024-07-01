@@ -1,33 +1,18 @@
-/**
- * This is currently a PoC, but working towards something production ready.
- *
- * What we need to do:
- *
- * - batching: clients should batch requests for a number of milliseconds,
- *   sending within say 5ms if no additional messages are received, but never
- *   more than 20ms after the first received message. one batch should not
- *   exceed some byte count... 4096?
- * - signing: nodes will be identified by an ed25519 pub key, messages
- *   will be individually signed, like:
- *   `["sig-base64","[\"fwd\",42,\"dest-base64\",\"msg-content\"]"]`
- * - websocket hello: to verify the client can sign with that pubkey
- *   must be received within some milliseconds of establishing the ws connection
- *   set a DO "alarm"?
- *   `["sig-base64","[\"hello\",0]"]`
- * - error if multiple websockets connected to one pubkey do
- * - ratelimit messages within a single do instance
- * - ratelimit messages (at larger rate) for an ip
- * - nonce/message id must be zero for the hello message
- * - nonce/message id must start at 1 for each peer communicated with
- *   and increment by exactly 1 for each additional message sent.
- *   we will need to maintain a map of these peer message ids that
- *   must be reset/cleared if the websocket is closed.
- */
-
 import { RateLimit } from './rate-limit.ts';
-import { verifySignedQuery, verifySignedHandshake } from './msg.ts';
 import { err } from './err.ts';
+import { ed } from './ed.ts';
 import { toB64Url, fromB64Url } from './b64.ts';
+import {
+  Msg,
+  MsgLbrt,
+  MsgLidl,
+  MsgAreq,
+  MsgAres,
+  MsgSrdy,
+  MsgKeep,
+  MsgNone,
+  MsgForward,
+} from './msg.ts';
 
 export interface Env {
   SIGNAL: DurableObjectNamespace;
@@ -51,14 +36,25 @@ async function ipRateLimit(env: Env, ip: string) {
   }
 }
 
-function checkNonce(nonce: number) {
-  const now = Date.now();
-  if (nonce < now - 5000) {
-    throw err('nonce older than 5 sec, update clock, or call /now', 400);
+function parsePubKey(path: string): {
+  pubKeyStr: string;
+  pubKeyBytes: Uint8Array;
+} {
+  const parts: Array<string> = path.split('/');
+
+  if (parts.length !== 2) {
+    throw err('expected single pubKey item on path', 400);
   }
-  if (nonce > now + 5000) {
-    throw err('nonce newer than 5 sec, update clock, or call /now', 400);
+
+  const pubKeyStr = parts[1];
+
+  const pubKeyBytes = fromB64Url(parts[1]);
+
+  if (pubKeyBytes.length !== 32) {
+    throw err('invalid pubKey length', 400);
   }
+
+  return { pubKeyStr, pubKeyBytes };
 }
 
 export default {
@@ -75,39 +71,22 @@ export default {
       const method = request.method;
       const url = new URL(request.url);
 
-      const path: string = url.pathname;
-
       // TODO - check headers for content-length / chunked encoding and reject?
 
       if (method !== 'GET') {
         throw err('expected GET', 400);
       }
 
-      if (path === '/now') {
-        return Response.json({ now: Date.now() });
-      }
+      const { pubKeyStr } = parsePubKey(url.pathname);
 
-      if (path !== '/') {
-        throw err('expected root path ("/")', 400);
-      }
-
-      // @ts-expect-error // cf typescript bug //
-      const nodeId: string = url.searchParams.get('k');
-      // @ts-expect-error // cf typescript bug //
-      const n: string = url.searchParams.get('n');
-      // @ts-expect-error // cf typescript bug //
-      const s: string = url.searchParams.get('s');
-
-      const q = verifySignedQuery(nodeId, n, s);
-      checkNonce(q.nonce);
-
-      // DO instanced by our nodeId
-      const id = env.SIGNAL.idFromName(nodeId);
+      // DO instanced by our pubKey
+      const id = env.SIGNAL.idFromName(pubKeyStr);
       const stub = env.SIGNAL.get(id);
 
       // just forward the full request / response
       return await stub.fetch(request);
     } catch (e: any) {
+      console.error('error', e.toString());
       return new Response(JSON.stringify({ err: e.toString() }), {
         status: e.status || 500,
       });
@@ -147,15 +126,16 @@ export class DoSignal implements DurableObject {
       try {
         const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
         const url = new URL(request.url);
-        const path: string = url.pathname;
 
-        if (path === '/fwd') {
+        if (url.pathname === '/fwd') {
           const message = await request.arrayBuffer();
           for (const ws of this.state.getWebSockets()) {
             ws.send(message);
           }
           return new Response('ok');
-        } else if (path === '/') {
+        } else {
+          const { pubKeyStr, pubKeyBytes } = parsePubKey(url.pathname);
+
           if (this.state.getWebSockets().length > 0) {
             throw err('websocket already connected', 400);
           }
@@ -170,23 +150,30 @@ export class DoSignal implements DurableObject {
           const nonce = new Uint8Array(32);
           crypto.getRandomValues(nonce);
 
-          // @ts-expect-error // cf typescript bug //
-          const nodeId = fromB64Url(url.searchParams.get('k'));
-
           server.serializeAttachment({
-            nodeId,
+            pubKey: pubKeyBytes,
             ip,
             nonce,
             valid: false,
           });
 
-          server.send(nonce);
+          server.send(new MsgLbrt(8000).encoded());
+          server.send(new MsgLidl(10000).encoded());
+          server.send(new MsgAreq(nonce).encoded());
+
+          console.log(
+            'webSocketOpen',
+            JSON.stringify({
+              pubKey: pubKeyStr,
+              ip,
+              nonce: toB64Url(nonce),
+            }),
+          );
 
           return new Response(null, { status: 101, webSocket: client });
-        } else {
-          throw err('invalid path', 400);
         }
       } catch (e: any) {
+        console.error('error', e.toString());
         return new Response(JSON.stringify({ err: e.toString() }), {
           status: e.status || 500,
         });
@@ -198,9 +185,9 @@ export class DoSignal implements DurableObject {
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
     await this.state.blockConcurrencyWhile(async () => {
       try {
-        const { nodeId, ip, nonce, valid } = ws.deserializeAttachment();
-        if (!nodeId) {
-          throw err('no associated nodeId');
+        const { pubKey, ip, nonce, valid } = ws.deserializeAttachment();
+        if (!pubKey) {
+          throw err('no associated pubKey');
         }
         if (!ip) {
           throw err('no associated ip');
@@ -213,58 +200,91 @@ export class DoSignal implements DurableObject {
         }
 
         // convert strings into binary
-        let msg: Uint8Array;
+        let msgRaw: Uint8Array;
         if (message instanceof ArrayBuffer) {
-          msg = new Uint8Array(message);
+          msgRaw = new Uint8Array(message);
         } else {
           const enc = new TextEncoder();
-          msg = enc.encode(message);
+          msgRaw = enc.encode(message);
         }
+
+        const msg = Msg.parse(msgRaw);
 
         if (!valid) {
           if (!nonce) {
             throw err('no associated nonce');
           }
-          verifySignedHandshake(nodeId, nonce, msg);
-          ws.serializeAttachment({
-            nodeId,
-            ip,
-            nonce: true, // don't need to keep the actual nonce anymore
-            valid: true,
-          });
-        } else {
-          if (msg.byteLength < 32) {
-            throw err('invalid destination', 400);
+
+          if (msg instanceof MsgAres) {
+            if (!ed.verify(msg.signature(), nonce, pubKey)) {
+              throw err('invalid handshake signature', 400);
+            }
+            console.log('webSocketSignatureVerified');
+
+            ws.send(new MsgSrdy().encoded());
+
+            ws.serializeAttachment({
+              pubKey,
+              ip,
+              nonce: true, // don't need to keep the actual nonce anymore
+              valid: true,
+            });
+          } else {
+            throw err(`invalid handshake message type ${msg.type()}`);
           }
+        } else {
+          if (msg instanceof MsgNone) {
+            // no-op
+          } else if (msg instanceof MsgKeep) {
+            // keep alive
+          } else if (msg instanceof MsgForward) {
+            // extract the destination pubKey (slice does a copy)
+            const dest = msg.pubKey().slice(0);
 
-          const dest = new Uint8Array(32);
-          dest.set(msg.subarray(0, 32));
-          msg.set(nodeId);
+            // overwrite the destination pubKey with the source (our) pubKey
+            // the pubKey() function returns a reference, so editing it
+            // alters the message that will be sent
+            msg.pubKey().set(pubKey, 0);
 
-          const req = new Request('http://do/fwd', {
-            method: 'POST',
-            body: msg,
-          });
+            const req = new Request('http://do/fwd', {
+              method: 'POST',
+              body: msg.encoded(),
+            });
 
-          const id = this.env.SIGNAL.idFromName(toB64Url(dest));
-          const stub = this.env.SIGNAL.get(id);
+            const id = this.env.SIGNAL.idFromName(toB64Url(dest));
+            const stub = this.env.SIGNAL.get(id);
 
-          // intentionally ignore errors here
-          await stub.fetch(req);
+            // intentionally ignore errors here
+            await stub.fetch(req);
+          } else {
+            throw err(`invalid post-handshake message type: ${msg.type()}`);
+          }
         }
       } catch (e: any) {
+        console.error('error', e.toString());
         ws.close(4000 + (e.status || 500), e.toString());
       }
     });
   }
 
-  // if the websocket is closed... close the websocket??
   async webSocketClose(
     ws: WebSocket,
     code: number,
     reason: string,
     wasClean: boolean,
   ) {
-    ws.close(code, reason);
+    const { pubKey, ip, nonce, valid } = ws.deserializeAttachment();
+    console.log(
+      'webSocketClose',
+      JSON.stringify({
+        pubKey: toB64Url(pubKey),
+        ip,
+        nonce: nonce instanceof Uint8Array ? toB64Url(nonce) : nonce,
+        valid,
+        code,
+        reason,
+        wasClean,
+      }),
+    );
   }
 }
