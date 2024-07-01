@@ -30,6 +30,13 @@ jobs:
           rustup toolchain install ${{ matrix.toolchain }} --profile minimal --no-self-update
           rustup default ${{ matrix.toolchain }}
 
+      - name: NodeJS Setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+          cache: 'npm'
+          cache-dependency-path: ts/sbd-server/package-lock.json
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
@@ -43,16 +50,20 @@ jobs:
           manifest-dir: ${{ github.workspace }}/.github/manifest
           github-binarycache: true
 
-      - name: Cargo Test Windows
+      - name: Test Windows
         if: matrix.os == 'windows-latest'
         env:
           RUST_BACKTRACE: 1
         run: |-
           $env:SODIUM_LIB_DIR="$(pwd)\vcpkg\packages\libsodium_x64-windows-release\lib"
-          cargo build --all-targets && cargo test -- --nocapture
+          make test
 
-      - name: Cargo Test
+      - name: Test
         if: matrix.os != 'windows-latest'
         env:
           RUST_BACKTRACE: 1
-        run: cargo build --all-targets && cargo test -- --nocapture
+        run: make test
+
+      - name: Cf Test
+        if: matrix.os == 'ubuntu-latest'
+        run: make cf-test

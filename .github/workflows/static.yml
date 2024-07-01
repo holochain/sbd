@@ -30,6 +30,13 @@ jobs:
           rustup component add rustfmt --toolchain ${{ matrix.toolchain }}
           rustup component add clippy --toolchain ${{ matrix.toolchain }}
 
+      - name: NodeJS Setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+          cache: 'npm'
+          cache-dependency-path: ts/sbd-server/package-lock.json
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
