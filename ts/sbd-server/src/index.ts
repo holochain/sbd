@@ -82,9 +82,7 @@ export default {
       const { pubKeyStr } = parsePubKey(url.pathname);
 
       const ipId = env.RATE_LIMIT.idFromName(ip);
-      const ipStub = env.RATE_LIMIT.get(
-        ipId,
-      ) as DurableObjectStub<DoRateLimit>;
+      const ipStub = env.RATE_LIMIT.get(ipId) as DurableObjectStub<DoRateLimit>;
       const { shouldBlock } = await ipStub.bytesReceived(
         Date.now(),
         pubKeyStr,
