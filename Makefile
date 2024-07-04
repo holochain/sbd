@@ -4,7 +4,7 @@
 
 SHELL = /usr/bin/env sh -eu
 
-default: static test
+default: static test cf-test
 
 publish-all:
 	$(MAKE) publish crate=sbd-client

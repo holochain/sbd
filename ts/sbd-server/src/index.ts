@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { RateLimit } from './rate-limit.ts';
+import { RateLimit, RateLimitResult } from './rate-limit.ts';
 import { err } from './err.ts';
 import { ed } from './ed.ts';
 import { toB64Url, fromB64Url } from './b64.ts';
@@ -15,29 +15,24 @@ import {
   MsgForward,
 } from './msg.ts';
 
-// How long to wait ahead of "now" to batch up message sends.
-// Note, we're setting this to zero which will try to send queued messages
-// as fast as possible. This doesn't mean messages won't be queued/batched,
-// since there will be a delay between requesting an alarm and when it
-// is actually invoked + however long it takes to actually run.
+/**
+ * How long to wait ahead of "now" to batch up message sends.
+ * Note, we're setting this to zero which will try to send queued messages
+ * as fast as possible. This doesn't mean messages won't be queued/batched,
+ * since there will be a delay between requesting an alarm and when it
+ * is actually invoked + however long it takes to actually run.
+ */
 const BATCH_DUR_MS = 0;
+
+/**
+ * How many nanoseconds of rate limiting quota should be burned by a single
+ * byte sent through the system. Higher numbers mean slower rate limiting.
+ */
+const LIMIT_NANOS_PER_BYTE = 8000;
 
 export interface Env {
   SIGNAL: DurableObjectNamespace;
   RATE_LIMIT: DurableObjectNamespace;
-}
-
-async function ipRateLimit(env: Env, ip: string) {
-  try {
-    const ipId = env.RATE_LIMIT.idFromName(ip);
-    const ipStub = env.RATE_LIMIT.get(ipId) as DurableObjectStub<DoRateLimit>;
-    const limit = await ipStub.trackRequest(Date.now(), 1);
-    if (limit > 0) {
-      throw err(`limit ${limit}`, 429);
-    }
-  } catch (e) {
-    throw err(`limit ${e}`, 429);
-  }
 }
 
 function parsePubKey(path: string): {
@@ -70,7 +65,7 @@ export default {
     try {
       const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
 
-      await ipRateLimit(env, ip);
+      //await ipRateLimit(env, ip);
 
       const method = request.method;
       const url = new URL(request.url);
@@ -107,11 +102,15 @@ export class DoRateLimit extends DurableObject {
     super(ctx, env);
     this.ctx = ctx;
     this.env = env;
-    this.rl = new RateLimit(5000);
+    this.rl = new RateLimit(LIMIT_NANOS_PER_BYTE, 16 * 16 * 1024);
   }
 
-  async trackRequest(now: number, reqWeightMs: number): Promise<number> {
-    return this.rl.trackRequest(now, reqWeightMs);
+  async bytesReceived(
+    now: number,
+    pk: string,
+    bytes: number,
+  ): Promise<RateLimitResult> {
+    return this.rl.bytesReceived(now, pk, bytes);
   }
 }
 
@@ -120,6 +119,7 @@ export class DoSignal extends DurableObject {
   env: Env;
   queue: { [index: string]: Array<Uint8Array> };
   alarmLock: boolean;
+  curLimit: number;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -127,6 +127,7 @@ export class DoSignal extends DurableObject {
     this.env = env;
     this.queue = {};
     this.alarmLock = false;
+    this.curLimit = 0;
   }
 
   async forward(messageList: Array<Uint8Array>) {
@@ -138,6 +139,7 @@ export class DoSignal extends DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
+    let cleanServer = null;
     try {
       const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
       const url = new URL(request.url);
@@ -154,6 +156,7 @@ export class DoSignal extends DurableObject {
       const [client, server] = Object.values(new WebSocketPair());
 
       this.ctx.acceptWebSocket(server);
+      cleanServer = server;
 
       const nonce = new Uint8Array(32);
       crypto.getRandomValues(nonce);
@@ -165,7 +168,9 @@ export class DoSignal extends DurableObject {
         valid: false,
       });
 
-      server.send(new MsgLbrt(8000).encoded());
+      // this will also send MsgLbrt
+      await this.ipRateLimit(ip, pubKeyStr, 1, server);
+
       server.send(new MsgLidl(10000).encoded());
       server.send(new MsgAreq(nonce).encoded());
 
@@ -181,9 +186,35 @@ export class DoSignal extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     } catch (e: any) {
       console.error('error', e.toString());
+      if (cleanServer) {
+        cleanServer.close(4000 + (e.status || 500), e.toString());
+      }
       return new Response(JSON.stringify({ err: e.toString() }), {
         status: e.status || 500,
       });
+    }
+  }
+
+  async ipRateLimit(ip: string, pk: string, bytes: number, ws: WebSocket) {
+    try {
+      const ipId = this.env.RATE_LIMIT.idFromName(ip);
+      const ipStub = this.env.RATE_LIMIT.get(
+        ipId,
+      ) as DurableObjectStub<DoRateLimit>;
+      const { limitNanosPerByte, shouldBlock } = await ipStub.bytesReceived(
+        Date.now(),
+        pk,
+        bytes,
+      );
+      if (shouldBlock) {
+        throw err(`limit`, 429);
+      }
+      if (this.curLimit !== limitNanosPerByte) {
+        this.curLimit = limitNanosPerByte;
+        ws.send(new MsgLbrt(limitNanosPerByte).encoded());
+      }
+    } catch (e) {
+      throw err(`limit ${e}`, 429);
     }
   }
 
@@ -199,8 +230,6 @@ export class DoSignal extends DurableObject {
           throw err('no associated ip');
         }
 
-        await ipRateLimit(this.env, ip);
-
         // convert strings into binary
         let msgRaw: Uint8Array;
         if (message instanceof ArrayBuffer) {
@@ -209,6 +238,8 @@ export class DoSignal extends DurableObject {
           const enc = new TextEncoder();
           msgRaw = enc.encode(message);
         }
+
+        await this.ipRateLimit(ip, pubKey, msgRaw.byteLength, ws);
 
         const msg = Msg.parse(msgRaw);
 
