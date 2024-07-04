@@ -15,7 +15,12 @@ import {
   MsgForward,
 } from './msg.ts';
 
-const BATCH_DUR_MS = 20;
+// How long to wait ahead of "now" to batch up message sends.
+// Note, we're setting this to zero which will try to send queued messages
+// as fast as possible. This doesn't mean messages won't be queued/batched,
+// since there will be a delay between requesting an alarm and when it
+// is actually invoked + however long it takes to actually run.
+const BATCH_DUR_MS = 0;
 
 export interface Env {
   SIGNAL: DurableObjectNamespace;
@@ -184,7 +189,7 @@ export class DoSignal extends DurableObject {
 
   // handle incoming websocket messages
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
-    const ip = await this.ctx.blockConcurrencyWhile(async () => {
+    await this.ctx.blockConcurrencyWhile(async () => {
       try {
         const { pubKey, ip, nonce, valid } = ws.deserializeAttachment();
         if (!pubKey) {
@@ -193,6 +198,8 @@ export class DoSignal extends DurableObject {
         if (!ip) {
           throw err('no associated ip');
         }
+
+        await ipRateLimit(this.env, ip);
 
         // convert strings into binary
         let msgRaw: Uint8Array;
@@ -258,39 +265,23 @@ export class DoSignal extends DurableObject {
             throw err(`invalid post-handshake message type: ${msg.type()}`);
           }
         }
-
-        return ip;
       } catch (e: any) {
         console.error('error', e.toString());
         ws.close(4000 + (e.status || 500), e.toString());
       }
     });
-
-    try {
-      // NOTE: It's a little odd to run the rate-limiting *after* forwarding,
-      //       but this lets our concurrency block be faster without having
-      //       to await the rate limit check.
-      //
-      //       It's not the end of the world if a couple extra messages get
-      //       through before the websocket is closed.
-      await ipRateLimit(this.env, ip);
-    } catch (e: any) {
-      console.error('error', e.toString());
-      ws.close(4000 + (e.status || 500), e.toString());
-    }
   }
 
   async alarm() {
     const { shouldReturn, queue } = await this.ctx.blockConcurrencyWhile(
       async () => {
-        if (this.alarmLock) {
+        if (this.alarmLock || Object.keys(this.queue).length === 0) {
           return { shouldReturn: true, queue: {} };
         }
         this.alarmLock = true;
         const queue = this.queue;
         this.queue = {};
-        const shouldReturn = Object.keys(queue).length === 0;
-        return { shouldReturn, queue };
+        return { shouldReturn: false, queue };
       },
     );
 
@@ -298,14 +289,20 @@ export class DoSignal extends DurableObject {
       return;
     }
 
-    for (const idName in queue) {
-      const id = this.env.SIGNAL.idFromName(idName);
-      const stub = this.env.SIGNAL.get(id) as DurableObjectStub<DoSignal>;
+    // We cannot do the actual forwarding within a blockConcurrency because
+    // then if two peers try to send each other data at the same time it
+    // will deadlock. Hence all the complexity with the alarms and alarmLock.
 
+    for (const idName in queue) {
       try {
+        const id = this.env.SIGNAL.idFromName(idName);
+        const stub = this.env.SIGNAL.get(id) as DurableObjectStub<DoSignal>;
+
         await stub.forward(queue[idName]);
-      } catch (e: any) {
-        /* pass */
+      } catch (_e: any) {
+        // It is okay to get errors forwarding to peers, they may have
+        // disconnected. We still want to forward to other peers who
+        // may still be there.
       }
     }
 
@@ -315,7 +312,6 @@ export class DoSignal extends DurableObject {
       if (Object.keys(this.queue).length !== 0) {
         const alarm = await this.ctx.storage.getAlarm();
         if (!alarm) {
-          // batch by 100 millis
           this.ctx.storage.setAlarm(Date.now() + BATCH_DUR_MS);
         }
       }
