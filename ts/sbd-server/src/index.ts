@@ -1,3 +1,4 @@
+import { DurableObject } from 'cloudflare:workers';
 import { RateLimit } from './rate-limit.ts';
 import { err } from './err.ts';
 import { ed } from './ed.ts';
@@ -14,6 +15,8 @@ import {
   MsgForward,
 } from './msg.ts';
 
+const BATCH_DUR_MS = 20;
+
 export interface Env {
   SIGNAL: DurableObjectNamespace;
   RATE_LIMIT: DurableObjectNamespace;
@@ -22,12 +25,8 @@ export interface Env {
 async function ipRateLimit(env: Env, ip: string) {
   try {
     const ipId = env.RATE_LIMIT.idFromName(ip);
-    const ipStub = env.RATE_LIMIT.get(ipId);
-    const res = await ipStub.fetch(new Request(`http://do`));
-    if (res.status !== 200) {
-      throw err(`limit bad status ${res.status}`, 429);
-    }
-    const { limit } = (await res.json()) as { limit: number };
+    const ipStub = env.RATE_LIMIT.get(ipId) as DurableObjectStub<DoRateLimit>;
+    const limit = await ipStub.trackRequest(Date.now(), 1);
     if (limit > 0) {
       throw err(`limit ${limit}`, 429);
     }
@@ -94,96 +93,98 @@ export default {
   },
 };
 
-export class DoRateLimit implements DurableObject {
-  state: DurableObjectState;
+export class DoRateLimit extends DurableObject {
+  ctx: DurableObjectState;
   env: Env;
   rl: RateLimit;
 
-  constructor(state: DurableObjectState, env: Env) {
-    this.state = state;
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.ctx = ctx;
     this.env = env;
     this.rl = new RateLimit(5000);
   }
 
-  async fetch(request: Request): Promise<Response> {
-    return Response.json({ limit: this.rl.trackRequest(Date.now(), 1) });
+  async trackRequest(now: number, reqWeightMs: number): Promise<number> {
+    return this.rl.trackRequest(now, reqWeightMs);
   }
 }
 
-export class DoSignal implements DurableObject {
-  state: DurableObjectState;
+export class DoSignal extends DurableObject {
+  ctx: DurableObjectState;
   env: Env;
-  rl: RateLimit;
+  queue: { [index: string]: Array<Uint8Array> };
+  alarmLock: boolean;
 
-  constructor(state: DurableObjectState, env: Env) {
-    this.state = state;
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.ctx = ctx;
     this.env = env;
-    this.rl = new RateLimit(5000);
+    this.queue = {};
+    this.alarmLock = false;
+  }
+
+  async forward(messageList: Array<Uint8Array>) {
+    for (const ws of this.ctx.getWebSockets()) {
+      for (const message of messageList) {
+        ws.send(message);
+      }
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
-    return await this.state.blockConcurrencyWhile(async () => {
-      try {
-        const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
-        const url = new URL(request.url);
+    try {
+      const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
+      const url = new URL(request.url);
 
-        if (url.pathname === '/fwd') {
-          const message = await request.arrayBuffer();
-          for (const ws of this.state.getWebSockets()) {
-            ws.send(message);
-          }
-          return new Response('ok');
-        } else {
-          const { pubKeyStr, pubKeyBytes } = parsePubKey(url.pathname);
+      const { pubKeyStr, pubKeyBytes } = parsePubKey(url.pathname);
 
-          if (this.state.getWebSockets().length > 0) {
-            throw err('websocket already connected', 400);
-          }
-          if (request.headers.get('Upgrade') !== 'websocket') {
-            throw err('expected websocket', 426);
-          }
-
-          const [client, server] = Object.values(new WebSocketPair());
-
-          this.state.acceptWebSocket(server);
-
-          const nonce = new Uint8Array(32);
-          crypto.getRandomValues(nonce);
-
-          server.serializeAttachment({
-            pubKey: pubKeyBytes,
-            ip,
-            nonce,
-            valid: false,
-          });
-
-          server.send(new MsgLbrt(8000).encoded());
-          server.send(new MsgLidl(10000).encoded());
-          server.send(new MsgAreq(nonce).encoded());
-
-          console.log(
-            'webSocketOpen',
-            JSON.stringify({
-              pubKey: pubKeyStr,
-              ip,
-              nonce: toB64Url(nonce),
-            }),
-          );
-
-          return new Response(null, { status: 101, webSocket: client });
-        }
-      } catch (e: any) {
-        console.error('error', e.toString());
-        return new Response(JSON.stringify({ err: e.toString() }), {
-          status: e.status || 500,
-        });
+      if (this.ctx.getWebSockets().length > 0) {
+        throw err('websocket already connected', 400);
       }
-    });
+      if (request.headers.get('Upgrade') !== 'websocket') {
+        throw err('expected websocket', 426);
+      }
+
+      const [client, server] = Object.values(new WebSocketPair());
+
+      this.ctx.acceptWebSocket(server);
+
+      const nonce = new Uint8Array(32);
+      crypto.getRandomValues(nonce);
+
+      server.serializeAttachment({
+        pubKey: pubKeyBytes,
+        ip,
+        nonce,
+        valid: false,
+      });
+
+      server.send(new MsgLbrt(8000).encoded());
+      server.send(new MsgLidl(10000).encoded());
+      server.send(new MsgAreq(nonce).encoded());
+
+      console.log(
+        'webSocketOpen',
+        JSON.stringify({
+          pubKey: pubKeyStr,
+          ip,
+          nonce: toB64Url(nonce),
+        }),
+      );
+
+      return new Response(null, { status: 101, webSocket: client });
+    } catch (e: any) {
+      console.error('error', e.toString());
+      return new Response(JSON.stringify({ err: e.toString() }), {
+        status: e.status || 500,
+      });
+    }
   }
 
   // handle incoming websocket messages
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
-    await this.state.blockConcurrencyWhile(async () => {
+    const ip = await this.ctx.blockConcurrencyWhile(async () => {
       try {
         const { pubKey, ip, nonce, valid } = ws.deserializeAttachment();
         if (!pubKey) {
@@ -191,12 +192,6 @@ export class DoSignal implements DurableObject {
         }
         if (!ip) {
           throw err('no associated ip');
-        }
-
-        await ipRateLimit(this.env, ip);
-
-        if (this.rl.trackRequest(Date.now(), 20) > 0) {
-          throw err('rate limit', 429);
         }
 
         // convert strings into binary
@@ -219,7 +214,6 @@ export class DoSignal implements DurableObject {
             if (!ed.verify(msg.signature(), nonce, pubKey)) {
               throw err('invalid handshake signature', 400);
             }
-            console.log('webSocketSignatureVerified');
 
             ws.send(new MsgSrdy().encoded());
 
@@ -229,6 +223,8 @@ export class DoSignal implements DurableObject {
               nonce: true, // don't need to keep the actual nonce anymore
               valid: true,
             });
+
+            console.log('webSocketAuthenticated');
           } else {
             throw err(`invalid handshake message type ${msg.type()}`);
           }
@@ -246,23 +242,82 @@ export class DoSignal implements DurableObject {
             // alters the message that will be sent
             msg.pubKey().set(pubKey, 0);
 
-            const req = new Request('http://do/fwd', {
-              method: 'POST',
-              body: msg.encoded(),
-            });
+            const id = toB64Url(dest);
+            if (!this.queue[id]) {
+              this.queue[id] = [];
+            }
+            this.queue[id].push(msg.encoded());
 
-            const id = this.env.SIGNAL.idFromName(toB64Url(dest));
-            const stub = this.env.SIGNAL.get(id);
-
-            // intentionally ignore errors here
-            await stub.fetch(req);
+            if (!this.alarmLock) {
+              const alarm = await this.ctx.storage.getAlarm();
+              if (!alarm) {
+                this.ctx.storage.setAlarm(Date.now() + BATCH_DUR_MS);
+              }
+            }
           } else {
             throw err(`invalid post-handshake message type: ${msg.type()}`);
           }
         }
+
+        return ip;
       } catch (e: any) {
         console.error('error', e.toString());
         ws.close(4000 + (e.status || 500), e.toString());
+      }
+    });
+
+    try {
+      // NOTE: It's a little odd to run the rate-limiting *after* forwarding,
+      //       but this lets our concurrency block be faster without having
+      //       to await the rate limit check.
+      //
+      //       It's not the end of the world if a couple extra messages get
+      //       through before the websocket is closed.
+      await ipRateLimit(this.env, ip);
+    } catch (e: any) {
+      console.error('error', e.toString());
+      ws.close(4000 + (e.status || 500), e.toString());
+    }
+  }
+
+  async alarm() {
+    const { shouldReturn, queue } = await this.ctx.blockConcurrencyWhile(
+      async () => {
+        if (this.alarmLock) {
+          return { shouldReturn: true, queue: {} };
+        }
+        this.alarmLock = true;
+        const queue = this.queue;
+        this.queue = {};
+        const shouldReturn = Object.keys(queue).length === 0;
+        return { shouldReturn, queue };
+      },
+    );
+
+    if (shouldReturn) {
+      return;
+    }
+
+    for (const idName in queue) {
+      const id = this.env.SIGNAL.idFromName(idName);
+      const stub = this.env.SIGNAL.get(id) as DurableObjectStub<DoSignal>;
+
+      try {
+        await stub.forward(queue[idName]);
+      } catch (e: any) {
+        /* pass */
+      }
+    }
+
+    await this.ctx.blockConcurrencyWhile(async () => {
+      this.alarmLock = false;
+
+      if (Object.keys(this.queue).length !== 0) {
+        const alarm = await this.ctx.storage.getAlarm();
+        if (!alarm) {
+          // batch by 100 millis
+          this.ctx.storage.setAlarm(Date.now() + BATCH_DUR_MS);
+        }
       }
     });
   }
