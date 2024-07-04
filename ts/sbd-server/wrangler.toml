@@ -1,6 +1,8 @@
-name = "sbd-signal"
+name = "sbd"
 main = "src/index.ts"
 compatibility_date = "2024-06-03"
+route = "sbd.holo.host/*"
+account_id = "18ff2b4e6205b938652998cfca0d8cff"
 
 [[durable_objects.bindings]]
 name = "SIGNAL"

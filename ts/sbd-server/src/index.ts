@@ -30,6 +30,11 @@ const BATCH_DUR_MS = 0;
  */
 const LIMIT_NANOS_PER_BYTE = 8000;
 
+/**
+ * Milliseconds connections are allowed to remain idle before being closed.
+ */
+const LIMIT_IDLE_MILLIS = 10000;
+
 export interface Env {
   SIGNAL: DurableObjectNamespace;
   RATE_LIMIT: DurableObjectNamespace;
@@ -65,8 +70,6 @@ export default {
     try {
       const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
 
-      //await ipRateLimit(env, ip);
-
       const method = request.method;
       const url = new URL(request.url);
 
@@ -77,6 +80,19 @@ export default {
       }
 
       const { pubKeyStr } = parsePubKey(url.pathname);
+
+      const ipId = env.RATE_LIMIT.idFromName(ip);
+      const ipStub = env.RATE_LIMIT.get(
+        ipId,
+      ) as DurableObjectStub<DoRateLimit>;
+      const { shouldBlock } = await ipStub.bytesReceived(
+        Date.now(),
+        pubKeyStr,
+        1,
+      );
+      if (shouldBlock) {
+        throw err(`limit`, 429);
+      }
 
       // DO instanced by our pubKey
       const id = env.SIGNAL.idFromName(pubKeyStr);
@@ -171,7 +187,7 @@ export class DoSignal extends DurableObject {
       // this will also send MsgLbrt
       await this.ipRateLimit(ip, pubKeyStr, 1, server);
 
-      server.send(new MsgLidl(10000).encoded());
+      server.send(new MsgLidl(LIMIT_IDLE_MILLIS).encoded());
       server.send(new MsgAreq(nonce).encoded());
 
       console.log(
@@ -262,7 +278,10 @@ export class DoSignal extends DurableObject {
               valid: true,
             });
 
-            console.log('webSocketAuthenticated');
+            console.log(
+              'webSocketAuthenticated',
+              JSON.stringify({ pubKey: toB64Url(pubKey) }),
+            );
           } else {
             throw err(`invalid handshake message type ${msg.type()}`);
           }
