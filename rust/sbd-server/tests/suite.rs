@@ -18,10 +18,13 @@ fn suite() {
         .unwrap();
 
     println!("RUNNING the test suite {:?}", suite.path());
-    assert!(suite
+    let result = suite
         .command()
         .arg(server.path())
-        .status()
-        .unwrap()
-        .success());
+        .status();
+
+    match result {
+        Ok(status) if status.success() => (),
+        _ => std::process::exit(127),
+    }
 }
