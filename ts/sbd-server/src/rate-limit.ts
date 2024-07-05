@@ -1,8 +1,22 @@
+/**
+ * `bytesReceived` call response type.
+ */
 export interface RateLimitResult {
+  /**
+   * How many nanos per byte this connection should be allowed to send.
+   */
   limitNanosPerByte: number;
+
+  /**
+   * True if this connection has already breached its rate limit.
+   */
   shouldBlock: boolean;
 }
 
+/**
+ * If a classic number, milliseconds since epoch.
+ * If a bigint, nanoseconds since epoch.
+ */
 function nowNanos(now: number | bigint): bigint {
   if (typeof now === 'bigint') {
     return now;
@@ -12,6 +26,9 @@ function nowNanos(now: number | bigint): bigint {
   }
 }
 
+/**
+ * Ratelimit potentially multiple clients coming from the same ip address.
+ */
 export class RateLimit {
   map: { [pk: string]: bigint };
   limitNanosPerByte: bigint;
@@ -24,6 +41,8 @@ export class RateLimit {
   }
 
   /**
+   * Clear out any connections older that 10s in the past.
+   *
    * - now: if now is a number, it is milliseconds since epoch
    *        if now is a bigint, it is nanoseconds since epoch
    */
@@ -43,6 +62,10 @@ export class RateLimit {
   }
 
   /**
+   * Log a number of bytes received from a single pubKey (connection).
+   * Return a bitrate limit this connection should be following, and
+   * whether that ip has already breached the limit.
+   *
    * - now: if now is a number, it is milliseconds since epoch
    *        if now is a bigint, it is nanoseconds since epoch
    */

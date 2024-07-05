@@ -35,11 +35,17 @@ const LIMIT_NANOS_PER_BYTE = 8000;
  */
 const LIMIT_IDLE_MILLIS = 10000;
 
+/**
+ * Cloudflare worker typescript boilerplate.
+ */
 export interface Env {
   SIGNAL: DurableObjectNamespace;
   RATE_LIMIT: DurableObjectNamespace;
 }
 
+/**
+ * Pull pubKey string and bytes from the url path.
+ */
 function parsePubKey(path: string): {
   pubKeyStr: string;
   pubKeyBytes: Uint8Array;
@@ -61,6 +67,10 @@ function parsePubKey(path: string): {
   return { pubKeyStr, pubKeyBytes };
 }
 
+/**
+ * This is the http entrypoint.
+ * Forward the request to the "SIGNAL" durable object.
+ */
 export default {
   async fetch(
     request: Request,
@@ -107,6 +117,10 @@ export default {
   },
 };
 
+/**
+ * "RATE_LIMIT" durable object.
+ * This is a thin wrapper around the "RateLimit" class.
+ */
 export class DoRateLimit extends DurableObject {
   ctx: DurableObjectState;
   env: Env;
@@ -128,6 +142,9 @@ export class DoRateLimit extends DurableObject {
   }
 }
 
+/**
+ * "SIGNAL" durable object.
+ */
 export class DoSignal extends DurableObject {
   ctx: DurableObjectState;
   env: Env;
@@ -144,6 +161,12 @@ export class DoSignal extends DurableObject {
     this.curLimit = 0;
   }
 
+  /**
+   * Client websockets are connected to a durable object identified
+   * by their own pubKey. When they send forward messages, those must
+   * be sent to durable objects identified by the destination pubKey.
+   * This is the api for those messages to be forwarded.
+   */
   async forward(messageList: Array<Uint8Array>) {
     for (const ws of this.ctx.getWebSockets()) {
       for (const message of messageList) {
@@ -152,6 +175,12 @@ export class DoSignal extends DurableObject {
     }
   }
 
+  /**
+   * This is the http endpoint for the "SIGNAL" durable object.
+   * The worker http fetch endpoint above forwards the request here.
+   * This function performs some checks, then upgrades the connection
+   * to a websocket.
+   */
   async fetch(request: Request): Promise<Response> {
     let cleanServer = null;
     try {
@@ -209,6 +238,10 @@ export class DoSignal extends DurableObject {
     }
   }
 
+  /**
+   * Helper function for performing the rate-limit check and
+   * closing the websocket if we violate the limit.
+   */
   async ipRateLimit(ip: string, pk: string, bytes: number, ws: WebSocket) {
     try {
       const ipId = this.env.RATE_LIMIT.idFromName(ip);
@@ -232,7 +265,10 @@ export class DoSignal extends DurableObject {
     }
   }
 
-  // handle incoming websocket messages
+  /**
+   * Handle incoming websocket messages.
+   * First handshake the connection, then start handling forwarding messages.
+   */
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
     await this.ctx.blockConcurrencyWhile(async () => {
       try {
@@ -320,6 +356,12 @@ export class DoSignal extends DurableObject {
     });
   }
 
+  /**
+   * The `webSocketMessage` handler above enqueues messages for delivery,
+   * then sets up an alarm to handle actually forwarding them. This ensures
+   * the messages are delivered in order without deadlocking two clients
+   * that happened to try to forward messages to each other at the same moment.
+   */
   async alarm() {
     const { shouldReturn, queue } = await this.ctx.blockConcurrencyWhile(
       async () => {
@@ -366,6 +408,9 @@ export class DoSignal extends DurableObject {
     });
   }
 
+  /**
+   * The websocket was closed.
+   */
   async webSocketClose(
     ws: WebSocket,
     code: number,
