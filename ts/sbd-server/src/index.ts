@@ -36,7 +36,7 @@ const LIMIT_NANOS_PER_BYTE = 8000;
 const LIMIT_IDLE_MILLIS = 10000;
 
 /**
- * Cloudflare worker typescript boilerplate.
+ * Cloudflare worker environment objects.
  */
 export interface Env {
   SIGNAL: DurableObjectNamespace;
