@@ -102,6 +102,8 @@ pub trait It {
 pub mod it_1;
 pub mod it_2;
 pub mod it_3;
+pub mod it_4;
+pub mod it_5;
 
 /// Execute the full test suite.
 pub async fn exec_all(server: &mut crate::Server) -> Report {
@@ -110,6 +112,8 @@ pub async fn exec_all(server: &mut crate::Server) -> Report {
     exec_one::<it_1::It1>(&mut helper).await;
     exec_one::<it_2::It2>(&mut helper).await;
     exec_one::<it_3::It3>(&mut helper).await;
+    exec_one::<it_4::It4>(&mut helper).await;
+    exec_one::<it_5::It5>(&mut helper).await;
 
     helper.into_report()
 }

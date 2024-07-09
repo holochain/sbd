@@ -317,7 +317,10 @@ export class DoSignal extends DurableObject {
               JSON.stringify({ pubKey: toB64Url(pubKey) }),
             );
           } else {
-            throw err(`invalid handshake message type ${msg.type()}`);
+            if (msg instanceof MsgForward) {
+              throw err(`invalid forward before handshake`);
+            }
+            // otherwise just ignore the message
           }
         } else {
           if (msg instanceof MsgNone) {
