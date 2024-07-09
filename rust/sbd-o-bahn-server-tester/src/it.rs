@@ -6,14 +6,12 @@ use crate::Report;
 macro_rules! expect {
     ($cond:expr, $note:expr) => {
         if !$cond {
-            return Err(::std::io::Error::other(
-                format!(
-                    "{}:{}: failed: {}",
-                    file!(),
-                    line!(),
-                    $note,
-                )
-            ));
+            return Err(::std::io::Error::other(format!(
+                "{}:{}: failed: {}",
+                file!(),
+                line!(),
+                $note,
+            )));
         }
     };
 }
@@ -72,7 +70,10 @@ impl<'h> TestHelper<'h> {
         path: String,
         max_message_size: usize,
         headers: Vec<(String, String)>,
-    ) -> Result<(sbd_client::raw_client::WsRawSend, sbd_client::raw_client::WsRawRecv)> {
+    ) -> Result<(
+        sbd_client::raw_client::WsRawSend,
+        sbd_client::raw_client::WsRawRecv,
+    )> {
         for addr in self.addr_list.iter() {
             if let Ok(client) = (sbd_client::raw_client::WsRawConnect {
                 full_url: format!("ws://{addr}/{path}"),
@@ -80,7 +81,10 @@ impl<'h> TestHelper<'h> {
                 allow_plain_text: true,
                 danger_disable_certificate_check: false,
                 headers: headers.clone(),
-            }).connect().await {
+            })
+            .connect()
+            .await
+            {
                 return Ok(client);
             }
         }
@@ -97,6 +101,7 @@ pub trait It {
 
 pub mod it_1;
 pub mod it_2;
+pub mod it_3;
 
 /// Execute the full test suite.
 pub async fn exec_all(server: &mut crate::Server) -> Report {
@@ -104,13 +109,12 @@ pub async fn exec_all(server: &mut crate::Server) -> Report {
 
     exec_one::<it_1::It1>(&mut helper).await;
     exec_one::<it_2::It2>(&mut helper).await;
+    exec_one::<it_3::It3>(&mut helper).await;
 
     helper.into_report()
 }
 
-async fn exec_one<'h, T: It>(
-    helper: &mut TestHelper<'h>,
-) {
+async fn exec_one<'h, T: It>(helper: &mut TestHelper<'h>) {
     println!("-- RUNNING TEST {} --", T::NAME);
 
     helper.start().await;

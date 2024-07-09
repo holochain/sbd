@@ -18,10 +18,7 @@ fn suite() {
         .unwrap();
 
     println!("RUNNING the test suite {:?}", suite.path());
-    let result = suite
-        .command()
-        .arg(server.path())
-        .status();
+    let result = suite.command().arg(server.path()).status();
 
     match result {
         Ok(status) if status.success() => (),

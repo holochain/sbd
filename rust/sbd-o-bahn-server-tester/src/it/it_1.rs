@@ -29,15 +29,9 @@ impl It for It1 {
 
             println!("check results");
 
-            expect!(
-                result1.pub_key_ref() == &p2[..],
-                "r1 recv from p2"
-            );
+            expect!(result1.pub_key_ref() == &p2[..], "r1 recv from p2");
             expect!(result1.message() == b"world", "r1 got 'world'");
-            expect!(
-                result2.pub_key_ref() == &p1[..],
-                "r2 recv from p1"
-            );
+            expect!(result2.pub_key_ref() == &p1[..], "r2 recv from p1");
             expect!(result2.message() == b"hello", "r2 got 'hello'");
 
             Ok(())
