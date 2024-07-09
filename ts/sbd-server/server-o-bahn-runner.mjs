@@ -36,7 +36,6 @@ class Srv {
 
     return await new Promise((r, _) => {
       rl.on('line', (line) => {
-        //console.log(`stdout:line:${line}`)
         const match = line.match(reReady)
         if (match && match.length > 1 && match[1]) {
           out.#addr = match[1]
