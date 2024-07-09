@@ -1,0 +1,18 @@
+name = "sbd"
+main = "src/index.ts"
+compatibility_date = "2024-06-03"
+route = "sbd.holo.host/*"
+account_id = "18ff2b4e6205b938652998cfca0d8cff"
+workers_dev = false
+
+[[durable_objects.bindings]]
+name = "SIGNAL"
+class_name = "DoSignal"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMIT"
+class_name = "DoRateLimit"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DoSignal", "DoRateLimit"]

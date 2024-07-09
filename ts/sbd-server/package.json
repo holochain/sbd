@@ -1,0 +1,27 @@
+{
+  "name": "sbd-signal",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "test:fmt": "prettier -w src",
+    "test:type": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test": "npm run test:fmt && npm run test:type && npm run test:unit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240620.0",
+    "node-cleanup": "^2.1.2",
+    "prettier": "^3.3.2",
+    "typescript": "^5.5.2",
+    "vitest": "^1.6.0",
+    "wrangler": "^3.63.1"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.1.0",
+    "@noble/hashes": "^1.4.0",
+    "js-base64": "^3.7.7"
+  }
+}

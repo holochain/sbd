@@ -1,10 +1,10 @@
 # sbd Makefile
 
-.PHONY: all publish-all publish bump test static
+.PHONY: default publish-all publish bump test cf-test static
 
 SHELL = /usr/bin/env sh -eu
 
-all: test
+default: static test cf-test
 
 publish-all:
 	$(MAKE) publish crate=sbd-client
@@ -53,11 +53,19 @@ bump:
 	fi
 	sed -i 's/^\(sbd[^=]*= { \|\)version = "[^"]*"/\1version = "$(ver)"/g' $$(find . -name Cargo.toml)
 
-test: static
+test:
 	cargo build --all-targets
 	RUST_BACKTRACE=1 cargo test
+
+cf-test:
+	cd ts/sbd-server && npm ci
+	cd ts/sbd-server && npm run test:unit
+	cd ts/sbd-server && cargo run --manifest-path ../../rust/sbd-o-bahn-server-tester/Cargo.toml -- node ./server-o-bahn-runner.mjs
 
 static:
 	cargo fmt -- --check
 	cargo clippy -- -Dwarnings
+	cd ts/sbd-server && npm ci
+	cd ts/sbd-server && npm run test:fmt
+	cd ts/sbd-server && npm run test:type
 	@if [ "${CI}x" != "x" ]; then git diff --exit-code; fi
