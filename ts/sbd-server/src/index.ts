@@ -36,6 +36,11 @@ const LIMIT_NANOS_PER_BYTE = 8000;
 const LIMIT_IDLE_MILLIS = 10000;
 
 /**
+ * Max message size.
+ */
+const MAX_MESSAGE_BYTES = 20000;
+
+/**
  * Cloudflare worker environment objects.
  */
 export interface Env {
@@ -290,6 +295,10 @@ export class DoSignal extends DurableObject {
         }
 
         await this.ipRateLimit(ip, pubKey, msgRaw.byteLength, ws);
+
+        if (msgRaw.byteLength > MAX_MESSAGE_BYTES) {
+          throw err('max message length exceeded', 400);
+        }
 
         const msg = Msg.parse(msgRaw);
 

@@ -51,6 +51,7 @@ If the header is a "command" the next four literal ascii bytes are interpreted a
 - `ares` - authentication response - 64 byte signature - client sent
 - `srdy` - server ready - no additional data - server sent
 - `keep` - keepalive - no additional data - client sent
+- `none` - unknown - arbitary additional data - reserved to repr unknown msg
 
 If the header is a "forward" type, the 32 byte header is interpreted as the public key to forward the message to.
 The remaining bytes in the message are the data to forward.
