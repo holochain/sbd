@@ -5,7 +5,8 @@ use std::sync::Arc;
 pub struct It4;
 
 impl It for It4 {
-    const NAME: &'static str = "ignore-none-pre-handshake";
+    const NAME: &'static str = "4-ignore-none-pre-handshake";
+    const DESC: &'static str = "ensure server ignores unknown commands before the handshake for forward compatibility";
 
     fn exec(helper: &mut TestHelper) -> impl Future<Output = Result<()>> {
         async {

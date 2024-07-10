@@ -5,7 +5,9 @@ use std::sync::Arc;
 pub struct It6;
 
 impl It for It6 {
-    const NAME: &'static str = "msg-too-big";
+    const NAME: &'static str = "6-msg-too-big";
+    const DESC: &'static str =
+        "connection is dropped if too large a message is sent";
 
     fn exec(helper: &mut TestHelper) -> impl Future<Output = Result<()>> {
         async {

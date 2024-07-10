@@ -4,7 +4,9 @@ use super::*;
 pub struct It1;
 
 impl It for It1 {
-    const NAME: &'static str = "sanity";
+    const NAME: &'static str = "1-sanity";
+    const DESC: &'static str =
+        "two simple nodes are able to send messages to each other";
 
     fn exec(helper: &mut TestHelper) -> impl Future<Output = Result<()>> {
         async {

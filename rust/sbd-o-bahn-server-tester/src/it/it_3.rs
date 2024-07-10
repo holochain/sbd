@@ -5,7 +5,8 @@ use std::sync::Arc;
 pub struct It3;
 
 impl It for It3 {
-    const NAME: &'static str = "bad-handshake-sig";
+    const NAME: &'static str = "3-bad-handshake-sig";
+    const DESC: &'static str = "connection is dropped if the client responds with a bad handshake signature";
 
     fn exec(helper: &mut TestHelper) -> impl Future<Output = Result<()>> {
         async {

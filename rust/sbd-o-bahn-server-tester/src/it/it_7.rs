@@ -7,7 +7,9 @@ const COUNT: usize = 10;
 pub struct It7;
 
 impl It for It7 {
-    const NAME: &'static str = "order-stress";
+    const NAME: &'static str = "7-order-stress";
+    const DESC: &'static str =
+        "multi-client echo stress test ensure messages are delivered in order";
 
     fn exec(helper: &mut TestHelper) -> impl Future<Output = Result<()>> {
         async {

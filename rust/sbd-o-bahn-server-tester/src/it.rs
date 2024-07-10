@@ -95,6 +95,7 @@ impl<'h> TestHelper<'h> {
 /// Test definition.
 pub trait It {
     const NAME: &'static str;
+    const DESC: &'static str;
 
     fn exec(helper: &mut TestHelper) -> impl Future<Output = Result<()>>;
 }
@@ -106,6 +107,7 @@ pub mod it_4;
 pub mod it_5;
 pub mod it_6;
 pub mod it_7;
+pub mod it_8;
 
 /// Execute the full test suite.
 pub async fn exec_all(server: &mut crate::Server) -> Report {
@@ -116,13 +118,15 @@ pub async fn exec_all(server: &mut crate::Server) -> Report {
     exec_one::<it_3::It3>(&mut helper).await;
     exec_one::<it_4::It4>(&mut helper).await;
     exec_one::<it_5::It5>(&mut helper).await;
+    exec_one::<it_6::It6>(&mut helper).await;
     exec_one::<it_7::It7>(&mut helper).await;
+    exec_one::<it_8::It8>(&mut helper).await;
 
     helper.into_report()
 }
 
 async fn exec_one<'h, T: It>(helper: &mut TestHelper<'h>) {
-    println!("-- RUNNING TEST {} --", T::NAME);
+    println!("-- RUNNING TEST {} ({}) --", T::NAME, T::DESC);
 
     helper.start().await;
 
