@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { Prom } from './prom.ts';
 import { RateLimit, RateLimitResult } from './rate-limit.ts';
 import { err } from './err.ts';
 import { ed } from './ed.ts';
@@ -44,8 +45,16 @@ const MAX_MESSAGE_BYTES = 20000;
  * Cloudflare worker environment objects.
  */
 export interface Env {
+  SBD_COORDINATION: KVNamespace;
   SIGNAL: DurableObjectNamespace;
   RATE_LIMIT: DurableObjectNamespace;
+}
+
+/**
+ * Seconds since epoch timestamp.
+ */
+function timestamp(): number {
+  return (Date.now() / 1000) | 0;
 }
 
 /**
@@ -92,6 +101,56 @@ export default {
 
       if (method !== 'GET') {
         throw err('expected GET', 400);
+      }
+
+      let pathParts = url.pathname.split('/')
+
+      if (pathParts.length === 4 && pathParts[1] === 'metrics') {
+        if (env['METRICS_API_' + pathParts[2]] !== pathParts[3]) {
+          throw err('bad metrics api key', 400);
+        }
+
+        const p = new Prom();
+
+        let res = await env.SBD_COORDINATION.list({ prefix: 'client' });
+
+        let count = 0;
+
+        while (true) {
+          for (const item of res.keys) {
+            if ('name' in item) {
+              count += 1;
+
+              const opened = item.metadata.opened || 0;
+              const active = item.metadata.active || 0;
+              const ip = item.metadata.ip || 'no-ip';
+              const activeBytesReceived = item.metadata.activeBytesReceived || 0;
+              p.guage(
+                false,
+                'client.recv.byte.count',
+                'bytes received from client',
+                { name: item.name.split(':')[1], opened, active, ip },
+                activeBytesReceived
+              );
+            }
+          }
+
+          if (res.list_complete) {
+            break;
+          }
+
+          res = await env.SBD_COORDINATION.list({ prefix: 'client', cursor: res.cursor });
+        }
+
+        p.guage(
+          true,
+          'client.count',
+          'active client count',
+          {},
+          count
+        );
+
+        return new Response(await p.render());
       }
 
       const { pubKeyStr } = parsePubKey(url.pathname);
@@ -156,6 +215,9 @@ export class DoSignal extends DurableObject {
   queue: { [index: string]: Array<Uint8Array> };
   alarmLock: boolean;
   curLimit: number;
+  active: number;
+  lastCoord: number;
+  activeBytesReceived: number;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -164,6 +226,9 @@ export class DoSignal extends DurableObject {
     this.queue = {};
     this.alarmLock = false;
     this.curLimit = 0;
+    this.active = timestamp();
+    this.lastCoord = timestamp();
+    this.activeBytesReceived = 0;
   }
 
   /**
@@ -209,11 +274,14 @@ export class DoSignal extends DurableObject {
       const nonce = new Uint8Array(32);
       crypto.getRandomValues(nonce);
 
+      const opened = timestamp();
+
       server.serializeAttachment({
         pubKey: pubKeyBytes,
         ip,
         nonce,
         valid: false,
+        opened,
       });
 
       // this will also send MsgLbrt
@@ -225,6 +293,8 @@ export class DoSignal extends DurableObject {
       console.log(
         'webSocketOpen',
         JSON.stringify({
+          opened,
+          active: this.active,
           pubKey: pubKeyStr,
           ip,
           nonce: toB64Url(nonce),
@@ -277,7 +347,7 @@ export class DoSignal extends DurableObject {
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
     await this.ctx.blockConcurrencyWhile(async () => {
       try {
-        const { pubKey, ip, nonce, valid } = ws.deserializeAttachment();
+        const { pubKey, ip, nonce, valid, opened } = ws.deserializeAttachment();
         if (!pubKey) {
           throw err('no associated pubKey');
         }
@@ -294,11 +364,14 @@ export class DoSignal extends DurableObject {
           msgRaw = enc.encode(message);
         }
 
+        this.activeBytesReceived += msgRaw.byteLength;
         await this.ipRateLimit(ip, pubKey, msgRaw.byteLength, ws);
 
         if (msgRaw.byteLength > MAX_MESSAGE_BYTES) {
           throw err('max message length exceeded', 400);
         }
+
+        const pubKeyStr = toB64Url(pubKey);
 
         const msg = Msg.parse(msgRaw);
 
@@ -319,12 +392,22 @@ export class DoSignal extends DurableObject {
               ip,
               nonce: true, // don't need to keep the actual nonce anymore
               valid: true,
+              opened
             });
 
             console.log(
               'webSocketAuthenticated',
-              JSON.stringify({ pubKey: toB64Url(pubKey) }),
+              JSON.stringify({ opened, active: this.active, pubKey: pubKeyStr }),
             );
+
+            const metadata = { opened, active: this.active, activeBytesReceived: this.activeBytesReceived, ip };
+            await this.env.SBD_COORDINATION.put(
+              `client:${pubKeyStr}`,
+              JSON.stringify(metadata),
+              { expirationTtl: 60, metadata }
+            );
+
+            this.lastCoord = timestamp();
           } else {
             if (msg instanceof MsgForward) {
               throw err(`invalid forward before handshake`);
@@ -332,6 +415,15 @@ export class DoSignal extends DurableObject {
             // otherwise just ignore the message
           }
         } else {
+          if (timestamp() - this.lastCoord >= 30) {
+            const metadata = { opened, active: this.active, activeBytesReceived: this.activeBytesReceived, ip };
+            await this.env.SBD_COORDINATION.put(
+              `client:${pubKeyStr}`,
+              JSON.stringify(metadata),
+              { expirationTtl: 60, metadata }
+            );
+          }
+
           if (msg instanceof MsgNone) {
             // no-op
           } else if (msg instanceof MsgKeep) {
@@ -429,10 +521,12 @@ export class DoSignal extends DurableObject {
     reason: string,
     wasClean: boolean,
   ) {
-    const { pubKey, ip, nonce, valid } = ws.deserializeAttachment();
+    const { pubKey, ip, nonce, valid, opened } = ws.deserializeAttachment();
     console.log(
       'webSocketClose',
       JSON.stringify({
+        opened,
+        active: this.active,
         pubKey: toB64Url(pubKey),
         ip,
         nonce: nonce instanceof Uint8Array ? toB64Url(nonce) : nonce,

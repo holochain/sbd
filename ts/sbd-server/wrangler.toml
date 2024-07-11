@@ -5,6 +5,10 @@ route = "sbd.holo.host/*"
 account_id = "18ff2b4e6205b938652998cfca0d8cff"
 workers_dev = false
 
+kv_namespaces = [
+  { binding = "SBD_COORDINATION", id = "cde857dd4ea745fea55f80daa52a6d5c" }
+]
+
 [[durable_objects.bindings]]
 name = "SIGNAL"
 class_name = "DoSignal"
