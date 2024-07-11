@@ -59,6 +59,14 @@ impl SendBuf {
 
     /// We received a new rate limit from the server, update our records.
     pub fn new_rate_limit(&mut self, limit: u64) {
+        /*
+
+        -- This was premature and caused some client lockups.
+        -- I'm going to leave the code in here for now as
+        -- an example of a naive solution that did *not* work,
+        -- in case we see that bumping rate limits on new
+        -- connections does indeed cause bad ratelimit drops.
+
         if limit < self.limit_rate {
             // rate limit updates are sent on a best effort,
             // and there are network timing conditions to worry about.
@@ -70,6 +78,9 @@ impl SendBuf {
             self.next_send_at = std::cmp::max(now, self.next_send_at)
                 + (MAX_MSG_SIZE as u64 * self.limit_rate);
         }
+
+        */
+
         self.limit_rate = limit;
         let kbps = (8_000_000.0 / limit as f64) as u64;
         let next_send_s = self.next_send_at as f64 / 1_000_000_000.0;

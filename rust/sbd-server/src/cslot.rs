@@ -341,18 +341,27 @@ async fn ws_task(
 
         ws.send(cmd::SbdCmd::auth_req(&nonce)).await?;
 
-        let auth_res = ws.recv().await?;
+        loop {
+            let auth_res = ws.recv().await?;
 
-        if !ip_rate.is_ok(&ip, auth_res.as_ref().len()).await {
-            return Err(Error::other("ip rate limited"));
-        }
-
-        if let cmd::SbdCmd::AuthRes(sig) = cmd::SbdCmd::parse(auth_res)? {
-            if !pk.verify(&sig, &nonce) {
-                return Err(Error::other("invalid sig"));
+            if !ip_rate.is_ok(&ip, auth_res.as_ref().len()).await {
+                return Err(Error::other("ip rate limited"));
             }
-        } else {
-            return Err(Error::other("invalid auth response"));
+
+            match cmd::SbdCmd::parse(auth_res)? {
+                cmd::SbdCmd::AuthRes(sig) => {
+                    if !pk.verify(&sig, &nonce) {
+                        return Err(Error::other("invalid sig"));
+                    }
+                    break;
+                }
+                cmd::SbdCmd::Message(_) => {
+                    return Err(Error::other(
+                        "invalid forward before handshake",
+                    ));
+                }
+                _ => continue,
+            }
         }
 
         // NOTE: the byte_nanos limit is sent during the cslot insert

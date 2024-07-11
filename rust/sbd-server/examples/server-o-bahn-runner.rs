@@ -15,6 +15,7 @@ async fn main() {
             "CMD/START" => {
                 drop(server);
                 let mut config = sbd_server::Config::default();
+                config.limit_clients = 100;
                 config.bind.push("127.0.0.1:0".to_string());
                 config.bind.push("[::1]:0".to_string());
                 server = Some(

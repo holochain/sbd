@@ -4,42 +4,43 @@ use std::io::{Error, Result};
 use crate::Report;
 
 macro_rules! expect {
-    ($h:ident, $cond:expr, $note:literal) => {
-        $h.expect(file!(), line!(), $cond, $note)
+    ($cond:expr, $note:expr) => {
+        if !$cond {
+            return Err(::std::io::Error::other(format!(
+                "{}:{}: failed: {}",
+                file!(),
+                line!(),
+                $note,
+            )));
+        }
     };
 }
 
 /// Utilities for helping with the test.
 pub struct TestHelper<'h> {
-    addr_list: &'h [String],
+    server: &'h mut crate::Server,
+    addr_list: Vec<String>,
     err_list: Vec<String>,
     report: Report,
 }
 
 impl<'h> TestHelper<'h> {
-    fn new(addr_list: &'h [String]) -> Self {
+    fn new(server: &'h mut crate::Server) -> Self {
         Self {
-            addr_list,
+            server,
+            addr_list: Vec::new(),
             err_list: Vec::new(),
             report: Report::default(),
         }
     }
 
-    fn into_report(self) -> Report {
-        self.report
+    pub async fn start(&mut self) {
+        self.addr_list = self.server.start().await;
+        println!("GOT RUNNING ADDRS: {:?}", self.addr_list);
     }
 
-    /// expect a condition to be true
-    pub fn expect(
-        &mut self,
-        file: &'static str,
-        line: u32,
-        cond: bool,
-        note: &'static str,
-    ) {
-        if !cond {
-            self.err_list.push(format!("{file}:{line}: failed: {note}"));
-        }
+    fn into_report(self) -> Report {
+        self.report
     }
 
     /// connect a client
@@ -62,33 +63,81 @@ impl<'h> TestHelper<'h> {
         }
         Err(Error::other("could not connect to server"))
     }
+
+    /// connect a raw client
+    pub async fn connect_raw_client(
+        &self,
+        path: String,
+        max_message_size: usize,
+        headers: Vec<(String, String)>,
+    ) -> Result<(
+        sbd_client::raw_client::WsRawSend,
+        sbd_client::raw_client::WsRawRecv,
+    )> {
+        for addr in self.addr_list.iter() {
+            if let Ok(client) = (sbd_client::raw_client::WsRawConnect {
+                full_url: format!("ws://{addr}/{path}"),
+                max_message_size,
+                allow_plain_text: true,
+                danger_disable_certificate_check: false,
+                headers: headers.clone(),
+            })
+            .connect()
+            .await
+            {
+                return Ok(client);
+            }
+        }
+        Err(Error::other("could not connect to server"))
+    }
 }
 
 /// Test definition.
 pub trait It {
     const NAME: &'static str;
+    const DESC: &'static str;
 
     fn exec(helper: &mut TestHelper) -> impl Future<Output = Result<()>>;
 }
 
 pub mod it_1;
+pub mod it_2;
+pub mod it_3;
+pub mod it_4;
+pub mod it_5;
+pub mod it_6;
+pub mod it_7;
+pub mod it_8;
 
 /// Execute the full test suite.
-pub async fn exec_all(addr_list: &[String]) -> Report {
-    let mut helper = TestHelper::new(addr_list);
+pub async fn exec_all(server: &mut crate::Server) -> Report {
+    let mut helper = TestHelper::new(server);
 
     exec_one::<it_1::It1>(&mut helper).await;
+    exec_one::<it_2::It2>(&mut helper).await;
+    exec_one::<it_3::It3>(&mut helper).await;
+    exec_one::<it_4::It4>(&mut helper).await;
+    exec_one::<it_5::It5>(&mut helper).await;
+    exec_one::<it_6::It6>(&mut helper).await;
+    exec_one::<it_7::It7>(&mut helper).await;
+    exec_one::<it_8::It8>(&mut helper).await;
 
     helper.into_report()
 }
 
 async fn exec_one<'h, T: It>(helper: &mut TestHelper<'h>) {
+    println!("-- RUNNING TEST {} ({}) --", T::NAME, T::DESC);
+
+    helper.start().await;
+
     helper.err_list.clear();
     match T::exec(helper).await {
         Ok(_) => {
+            println!("passed");
             helper.report.passed.push(T::NAME.to_string());
         }
         Err(err) => {
+            println!("{err:?}");
             helper.err_list.push(err.to_string());
             let err = format!("{:?}", helper.err_list);
             helper.err_list.clear();

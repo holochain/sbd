@@ -4,8 +4,9 @@ async fn main() {
     // remove the "self" arg
     args.remove(0);
     let result = sbd_o_bahn_server_tester::run(args).await;
-    println!("{result:#?}");
+    println!("-- TEST RESULTS --\n{result:#?}");
     if !result.failed.is_empty() {
-        panic!("TEST FAILED");
+        eprintln!("TEST FAILED");
+        std::process::exit(127);
     }
 }
