@@ -1,4 +1,4 @@
-function renderLabels(labels: object): string {
+function renderLabels(labels: { [index: string]: any }): string {
   const out = ['{'];
   let isFirst = true;
   for (const key in labels) {
@@ -25,8 +25,13 @@ export class Prom {
     this.#lines = [];
   }
 
-
-  guage(prepend: boolean, name: string, help: string, labels: object, val: number) {
+  guage(
+    prepend: boolean,
+    name: string,
+    help: string,
+    labels: { [index: string]: any },
+    val: number,
+  ) {
     if (prepend) {
       this.#lines.unshift('');
       this.#lines.unshift(`${name}${renderLabels(labels)} ${val}`);

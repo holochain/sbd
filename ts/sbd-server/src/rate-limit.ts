@@ -1,3 +1,7 @@
+import { DurableObject } from 'cloudflare:workers';
+
+import * as common from './common.ts';
+
 /**
  * `bytesReceived` call response type.
  */
@@ -102,5 +106,30 @@ export class RateLimit {
     const limitNanosPerByte = Number(this.limitNanosPerByte * nodeCount);
 
     return { limitNanosPerByte, shouldBlock };
+  }
+}
+
+/**
+ * "RATE_LIMIT" durable object.
+ * This is a thin wrapper around the "RateLimit" class.
+ */
+export class DoRateLimit extends DurableObject {
+  ctx: DurableObjectState;
+  env: common.Env;
+  rl: RateLimit;
+
+  constructor(ctx: DurableObjectState, env: common.Env) {
+    super(ctx, env);
+    this.ctx = ctx;
+    this.env = env;
+    this.rl = new RateLimit(common.LIMIT_NANOS_PER_BYTE, 16 * 16 * 1024);
+  }
+
+  async bytesReceived(
+    now: number,
+    pk: string,
+    bytes: number,
+  ): Promise<RateLimitResult> {
+    return this.rl.bytesReceived(now, pk, bytes);
   }
 }
