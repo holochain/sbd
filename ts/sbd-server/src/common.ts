@@ -20,6 +20,11 @@ export const BATCH_DUR_MS = 0;
 export const LIMIT_NANOS_PER_BYTE = 8000;
 
 /**
+ * How many nanoseconds of rate limiting burst graceperiod is allowed
+ */
+export const LIMIT_NANOS_BURST = LIMIT_NANOS_PER_BYTE * 16 * 16 * 1024;
+
+/**
  * Milliseconds connections are allowed to remain idle before being closed.
  */
 export const LIMIT_IDLE_MILLIS = 10000;
@@ -29,26 +34,28 @@ export const LIMIT_IDLE_MILLIS = 10000;
  */
 export const MAX_MESSAGE_BYTES = 20000;
 
-/**
+/*
+/ **
  * Cloudflare worker environment objects.
- */
+ * /
 export interface EnvExplicit {
   SBD_COORDINATION: KVNamespace;
   SIGNAL: DurableObjectNamespace;
   RATE_LIMIT: DurableObjectNamespace;
 }
 
-/**
+/ **
  * Cloudflare worker environment variables.
- */
+ * /
 export interface EnvVars {
   [index: string]: string;
 }
 
-/**
+/ **
  * Combined Cloudflare Env type.
- */
+ * /
 export type Env = EnvExplicit & EnvVars;
+*/
 
 /**
  * Mixin to allow errors with status codes.

@@ -17,7 +17,7 @@ export { DoSignal };
 export default {
   async fetch(
     request: Request,
-    env: common.Env,
+    env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
     try {
@@ -120,6 +120,7 @@ export default {
       const ipStub = env.RATE_LIMIT.get(ipId) as DurableObjectStub<DoRateLimit>;
       const { shouldBlock } = await ipStub.bytesReceived(
         Date.now(),
+        ip,
         pubKeyStr,
         1,
       );

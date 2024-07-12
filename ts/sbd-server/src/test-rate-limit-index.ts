@@ -12,7 +12,7 @@ export { DoSignal };
 export default {
   async fetch(
     request: Request,
-    env: common.Env,
+    env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
     return new Response('bob');

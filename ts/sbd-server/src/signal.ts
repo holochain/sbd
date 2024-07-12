@@ -20,7 +20,7 @@ import {
  */
 export class DoSignal extends DurableObject {
   ctx: DurableObjectState;
-  env: common.Env;
+  env: Env;
   queue: { [index: string]: Array<Uint8Array> };
   alarmLock: boolean;
   curLimit: number;
@@ -28,7 +28,7 @@ export class DoSignal extends DurableObject {
   lastCoord: number;
   activeBytesReceived: number;
 
-  constructor(ctx: DurableObjectState, env: common.Env) {
+  constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.ctx = ctx;
     this.env = env;
@@ -134,6 +134,7 @@ export class DoSignal extends DurableObject {
       ) as DurableObjectStub<DoRateLimit>;
       const { limitNanosPerByte, shouldBlock } = await ipStub.bytesReceived(
         Date.now(),
+        ip,
         pk,
         bytes,
       );
