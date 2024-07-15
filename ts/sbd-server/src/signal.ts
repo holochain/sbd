@@ -27,6 +27,7 @@ export class DoSignal extends DurableObject {
   active: number;
   lastCoord: number;
   activeBytesReceived: number;
+  status: number;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -38,6 +39,7 @@ export class DoSignal extends DurableObject {
     this.active = common.timestamp();
     this.lastCoord = common.timestamp();
     this.activeBytesReceived = 0;
+    this.status = 200;
   }
 
   /**
@@ -47,9 +49,25 @@ export class DoSignal extends DurableObject {
    * This is the api for those messages to be forwarded.
    */
   async forward(messageList: Array<Uint8Array>) {
+    if (this.status !== 200) {
+      return;
+    }
+
+    // MAYBE: buffer messages until handshake complete?
+    //        might not be needed since clients shouldn't publish the address
+    //        until handshake is complete
+
+    // This loop not technically needed, since our fetch ensures there
+    // is only ever one websocket connected.
     for (const ws of this.ctx.getWebSockets()) {
       for (const message of messageList) {
-        ws.send(message);
+        try {
+          ws.send(message);
+        } catch (e: any) {
+          console.error('forward error', e);
+          this.status = 500;
+          return;
+        }
       }
     }
   }
@@ -61,6 +79,12 @@ export class DoSignal extends DurableObject {
    * to a websocket.
    */
   async fetch(request: Request): Promise<Response> {
+    if (this.status !== 200) {
+      return new Response(JSON.stringify({ err: 'dead' }), {
+        status: this.status,
+      });
+    }
+
     let cleanServer = null;
     try {
       const ip = request.headers.get('cf-connecting-ip') || 'no-ip';
@@ -112,8 +136,15 @@ export class DoSignal extends DurableObject {
 
       return new Response(null, { status: 101, webSocket: client });
     } catch (e: any) {
+      // Note: one might be tempted to set this.status here, but then bad
+      //       actors could maliciously drop other peer connections just
+      //       by trying (and failing) to connect to them.
+
       console.error('error', e.toString());
       if (cleanServer) {
+        // Note: HERE it's okay to set this.status, since we know we're
+        //       the original connecting websocket.
+        this.status = e.status || 500;
         cleanServer.close(4000 + (e.status || 500), e.toString());
       }
       return new Response(JSON.stringify({ err: e.toString() }), {
@@ -155,6 +186,11 @@ export class DoSignal extends DurableObject {
    * First handshake the connection, then start handling forwarding messages.
    */
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
+    if (this.status !== 200) {
+      ws.close(4000 + this.status, 'dead');
+      return;
+    }
+
     await this.ctx.blockConcurrencyWhile(async () => {
       try {
         const { pubKey, ip, nonce, valid, opened } = ws.deserializeAttachment();
@@ -214,6 +250,7 @@ export class DoSignal extends DurableObject {
               }),
             );
 
+            this.lastCoord = common.timestamp();
             const metadata = {
               op: opened,
               ac: this.active,
@@ -225,8 +262,6 @@ export class DoSignal extends DurableObject {
               JSON.stringify(metadata),
               { expirationTtl: 60, metadata },
             );
-
-            this.lastCoord = common.timestamp();
           } else {
             if (msg instanceof MsgForward) {
               throw common.err(`invalid forward before handshake`);
@@ -235,6 +270,7 @@ export class DoSignal extends DurableObject {
           }
         } else {
           if (common.timestamp() - this.lastCoord >= 30) {
+            this.lastCoord = common.timestamp();
             const metadata = {
               op: opened,
               ac: this.active,
@@ -281,7 +317,8 @@ export class DoSignal extends DurableObject {
         }
       } catch (e: any) {
         console.error('error', e.toString());
-        ws.close(4000 + (e.status || 500), e.toString());
+        this.status = e.status || 500;
+        ws.close(4000 + this.status, e.toString());
       }
     });
   }
@@ -293,6 +330,10 @@ export class DoSignal extends DurableObject {
    * that happened to try to forward messages to each other at the same moment.
    */
   async alarm() {
+    if (this.status !== 200) {
+      return;
+    }
+
     const { shouldReturn, queue } = await this.ctx.blockConcurrencyWhile(
       async () => {
         if (this.alarmLock || Object.keys(this.queue).length === 0) {
