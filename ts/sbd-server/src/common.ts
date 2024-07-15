@@ -34,29 +34,6 @@ export const LIMIT_IDLE_MILLIS = 10000;
  */
 export const MAX_MESSAGE_BYTES = 20000;
 
-/*
-/ **
- * Cloudflare worker environment objects.
- * /
-export interface EnvExplicit {
-  SBD_COORDINATION: KVNamespace;
-  SIGNAL: DurableObjectNamespace;
-  RATE_LIMIT: DurableObjectNamespace;
-}
-
-/ **
- * Cloudflare worker environment variables.
- * /
-export interface EnvVars {
-  [index: string]: string;
-}
-
-/ **
- * Combined Cloudflare Env type.
- * /
-export type Env = EnvExplicit & EnvVars;
-*/
-
 /**
  * Mixin to allow errors with status codes.
  */

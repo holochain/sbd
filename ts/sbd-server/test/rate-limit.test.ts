@@ -1,10 +1,4 @@
-import {
-  env,
-  //createExecutionContext,
-  //waitOnExecutionContext,
-  runInDurableObject,
-  //SELF
-} from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
 import { DoRateLimit } from '../src';
 
