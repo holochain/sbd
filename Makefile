@@ -65,7 +65,7 @@ cf-test:
 static:
 	cargo fmt -- --check
 	cargo clippy -- -Dwarnings
-	cd ts/sbd-server && npm ci
+	cd ts/sbd-server && npm --verbose ci
 	cd ts/sbd-server && npm run test:fmt
 	cd ts/sbd-server && npm run test:type
 	@if [ "${CI}x" != "x" ]; then git diff --exit-code; fi
