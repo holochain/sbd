@@ -10,7 +10,7 @@ import {
   MsgNone,
   MsgForward,
 } from './msg.ts';
-import { ed } from './ed.ts';
+import * as common from './common.ts';
 
 describe('Msg', () => {
   it('lbrt', async () => {

@@ -5,7 +5,8 @@
     "module": "es2022",
     "moduleResolution": "node",
     "types": [
-      "@cloudflare/workers-types/2023-07-01"
+      "@cloudflare/workers-types/2023-07-01",
+      "@cloudflare/vitest-pool-workers"
     ],
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
@@ -17,5 +18,6 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true
-  }
+  },
+  "include": ["./*.ts"]
 }

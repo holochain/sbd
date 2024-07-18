@@ -1,6 +1,4 @@
-import { ed } from './ed.ts';
-import { err } from './err.ts';
-import { toB64Url, fromB64Url } from './b64.ts';
+import * as common from './common.ts';
 
 /**
  * Byte-by-byte comparison of Uint8Array types.
@@ -90,13 +88,13 @@ export class Msg {
     bytes: Uint8Array,
   ): MsgLbrt | MsgLidl | MsgAreq | MsgAres | MsgSrdy | MsgKeep {
     if (bytes.byteLength < 32) {
-      throw err(`invalid msg length ${bytes.byteLength}`, 400);
+      throw common.err(`invalid msg length ${bytes.byteLength}`, 400);
     }
 
     if (cmp(bytes.subarray(0, 28), CMD)) {
       if (cmp(bytes.subarray(28, 32), MSG_B_LBRT)) {
         if (bytes.byteLength !== 32 + 4) {
-          throw err(
+          throw common.err(
             `invalid lbrt msg length, expected 36, got: ${bytes.byteLength}`,
             400,
           );
@@ -105,7 +103,7 @@ export class Msg {
         return new MsgLbrt(limit);
       } else if (cmp(bytes.subarray(28, 32), MSG_B_LIDL)) {
         if (bytes.byteLength !== 32 + 4) {
-          throw err(
+          throw common.err(
             `invalid lidl msg length, expected 36, got: ${bytes.byteLength}`,
             400,
           );
@@ -114,7 +112,7 @@ export class Msg {
         return new MsgLidl(limit);
       } else if (cmp(bytes.subarray(28, 32), MSG_B_AREQ)) {
         if (bytes.byteLength !== 32 + 32) {
-          throw err(
+          throw common.err(
             `invalid areq msg length, expected 64, got: ${bytes.byteLength}`,
             400,
           );
@@ -123,7 +121,7 @@ export class Msg {
         return new MsgAreq(nonce);
       } else if (cmp(bytes.subarray(28, 32), MSG_B_ARES)) {
         if (bytes.byteLength !== 32 + 64) {
-          throw err(
+          throw common.err(
             `invalid ares msg length, expected 96, got: ${bytes.byteLength}`,
             400,
           );
@@ -132,7 +130,7 @@ export class Msg {
         return new MsgAres(signature);
       } else if (cmp(bytes.subarray(28, 32), MSG_B_SRDY)) {
         if (bytes.byteLength !== 32) {
-          throw err(
+          throw common.err(
             `invalid srdy msg length, expected 32, got: ${bytes.byteLength}`,
             400,
           );
@@ -140,7 +138,7 @@ export class Msg {
         return new MsgSrdy();
       } else if (cmp(bytes.subarray(28, 32), MSG_B_KEEP)) {
         if (bytes.byteLength !== 32) {
-          throw err(
+          throw common.err(
             `invalid keep msg length, expected 32, got: ${bytes.byteLength}`,
             400,
           );
@@ -322,7 +320,7 @@ export class MsgForward extends Msg {
    */
   static build(pubKey: Uint8Array, payload: Uint8Array): MsgForward {
     if (pubKey.byteLength !== 32) {
-      throw err(
+      throw common.err(
         `invalid pubKey length, expected 32, got: ${pubKey.byteLength}`,
         400,
       );
