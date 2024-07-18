@@ -21,10 +21,11 @@ function renderLabels(labels: { [index: string]: any }): string {
   return out.join('');
 }
 
+// All the npm modules I could find out there depended on nodejs apis.
+// I just need a simple protocol renderer that can be used in cloudflare.
+
 /**
  * Hand-rolled simplistic prometheus metrics renderer.
- * All the npm modules I could find out there depended on nodejs apis.
- * I just need a simple protocol renderer that can be used in cloudflare.
  */
 export class Prom {
   #lines: Array<string>;
