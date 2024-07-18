@@ -58,18 +58,14 @@ test:
 	RUST_BACKTRACE=1 cargo test
 
 cf-test:
-	#npm ci is temporarrily broken
-	#cd ts/sbd-server && npm ci
-	cd ts/sbd-server && npm install
+	cd ts/sbd-server && npm ci
 	cd ts/sbd-server && npm run test:unit
 	cd ts/sbd-server && cargo run --manifest-path ../../rust/sbd-o-bahn-server-tester/Cargo.toml -- node ./server-o-bahn-runner.mjs
 
 static:
 	cargo fmt -- --check
 	cargo clippy -- -Dwarnings
-	#npm ci is temporarrily broken
-	#cd ts/sbd-server && npm --verbose ci
-	cd ts/sbd-server && npm install
+	cd ts/sbd-server && npm ci
 	cd ts/sbd-server && npm run test:fmt
 	cd ts/sbd-server && npm run test:type
 	@if [ "${CI}x" != "x" ]; then git diff --exit-code; fi

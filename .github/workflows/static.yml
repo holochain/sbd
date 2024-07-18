@@ -33,7 +33,7 @@ jobs:
       - name: NodeJS Setup
         uses: actions/setup-node@v4
         with:
-          node-version: latest
+          node-version: '20.x'
           cache: 'npm'
           cache-dependency-path: ts/sbd-server/package-lock.json
 
