@@ -57,6 +57,7 @@ export default {
               let opened = 0;
               let active = 0;
               let activeBytesReceived = 0;
+              let recIp = 'no-ip';
 
               if (
                 'op' in item.metadata &&
@@ -76,6 +77,12 @@ export default {
               ) {
                 activeBytesReceived = item.metadata.br;
               }
+              if (
+                'ip' in item.metadata &&
+                typeof item.metadata.ip === 'string'
+              ) {
+                recIp = item.metadata.ip;
+              }
 
               const now = common.timestamp();
 
@@ -92,7 +99,7 @@ export default {
                   openedD,
                   active,
                   activeD,
-                  ip,
+                  recIp,
                 },
                 activeBytesReceived,
               );
