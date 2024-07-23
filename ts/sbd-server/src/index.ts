@@ -99,7 +99,7 @@ export default {
                   openedD,
                   active,
                   activeD,
-                  recIp,
+                  ip: recIp,
                 },
                 activeBytesReceived,
               );
