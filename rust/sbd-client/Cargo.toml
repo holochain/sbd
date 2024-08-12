@@ -1,6 +1,6 @@
 [package]
 name = "sbd-client"
-version = "0.0.5-alpha"
+version = "0.0.6-alpha"
 description = "simple websocket-based message relay client"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/holochain/sbd"

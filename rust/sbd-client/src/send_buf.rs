@@ -81,13 +81,16 @@ impl SendBuf {
 
         */
 
+
         self.limit_rate = limit;
         let kbps = (8_000_000.0 / limit as f64) as u64;
-        let next_send_s = self.next_send_at as f64 / 1_000_000_000.0;
+        let now = self.origin.elapsed().as_nanos() as u64;
+        let next_send_s = (now - self.next_send_at) as f64 / 1_000_000_000.0;
         tracing::debug!(
             target: "NETAUDIT",
             full_url = self.full_url,
             kbps,
+            limit,
             next_send_s,
             m = "sbd-client",
             a = "new_rate_limit",

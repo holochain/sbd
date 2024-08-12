@@ -22,13 +22,16 @@ const NONCE_SIZE: usize = 32;
 pub(crate) const CMD_PREFIX: &[u8; 28] = &[0; 28];
 
 /// Sbd commands.
-/// Enum variants represent only the types that clients can send to the server:
+///
+/// ### Enum variants represent only the types that clients can send to the server:
+///
 /// - not-cmd Message(payload)
 /// - `keep` Keepalive
 /// - `ares` AuthRes(signature)
 /// - other-cmd Unknown
-/// Member functions represent only the types that the server can send to the
-/// clients:
+///
+/// ### Member functions represent only the types that the server can send to the clients:
+///
 /// - `lbrt` limit_byte_nanos(i32)
 /// - `lidl` limit_idle_millis(i32)
 /// - `areq` auth_req(nonce)
