@@ -81,7 +81,6 @@ impl SendBuf {
 
         */
 
-
         self.limit_rate = limit;
         let kbps = (8_000_000.0 / limit as f64) as u64;
         let now = self.origin.elapsed().as_nanos() as u64;
