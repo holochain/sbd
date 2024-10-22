@@ -158,6 +158,13 @@ export class DoSignal extends DurableObject {
    * closing the websocket if we violate the limit.
    */
   async ipRateLimit(ip: string, pk: string, bytes: number, ws: WebSocket) {
+    // disabling rate limiting temporarily as an experiment
+    const HACK_NANOS_PER_BYTE = 1;
+    if (this.curLimit !== HACK_NANOS_PER_BYTE) {
+      this.curLimit = HACK_NANOS_PER_BYTE;
+      ws.send(new MsgLbrt(HACK_NANOS_PER_BYTE).encoded());
+    }
+    /*
     try {
       const ipId = this.env.RATE_LIMIT.idFromName(ip);
       const ipStub = this.env.RATE_LIMIT.get(
@@ -179,6 +186,7 @@ export class DoSignal extends DurableObject {
     } catch (e) {
       throw common.err(`limit ${e}`, 429);
     }
+    */
   }
 
   /**
