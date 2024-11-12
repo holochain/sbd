@@ -240,11 +240,10 @@ fn priv_system_tls(
         not(feature = "force_webpki_roots"),
         any(target_os = "windows", target_os = "linux", target_os = "macos",),
     ))]
-    for cert in rustls_native_certs::load_native_certs()
-        .expect("failed to load system tls certs")
-    {
-        roots.add(cert).expect("failed to add cert to root");
-    }
+    roots.add_parsable_certificates(
+        rustls_native_certs::load_native_certs()
+            .expect("failed to load system tls certs"),
+    );
 
     if danger_disable_certificate_check {
         let v = rustls::client::WebPkiServerVerifier::builder(Arc::new(roots))
