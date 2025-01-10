@@ -181,7 +181,7 @@ async fn max_msg_size() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn idle_close_connections() {
-    const DUR: std::time::Duration = std::time::Duration::from_millis(20);
+    const DUR: std::time::Duration = std::time::Duration::from_millis(500);
 
     let test = Test::new().await;
 
@@ -190,16 +190,11 @@ async fn idle_close_connections() {
         test.conn(Cfg::d().idle(DUR)),
     );
 
-    println!("bla1");
-
     c2.send(c1.pub_key(), b"wabonb").await.unwrap();
-    println!("bla2");
     let _ = r1.recv().await.unwrap();
-
-    println!("bla3");
-    println!("counts: {} {}", c1.active_peers().len(), c2.active_peers().len());
 
     tokio::time::sleep(DUR * 2).await;
 
-    println!("counts: {} {}", c1.active_peers().len(), c2.active_peers().len());
+    assert_eq!(0, c1.active_peers().len());
+    assert_eq!(0, c2.active_peers().len());
 }

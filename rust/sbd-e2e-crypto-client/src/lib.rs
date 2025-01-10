@@ -58,7 +58,8 @@ impl MsgRecv {
     pub async fn recv(&mut self) -> Option<(PubKey, bytes::Bytes)> {
         while let Some(msg) = self.recv.recv().await {
             let pk = msg.pub_key();
-            match self.inner.lock().unwrap().dec(msg) {
+            let dec = self.inner.lock().unwrap().dec(msg);
+            match dec {
                 DecRes::Ok(msg) => return Some((pk, msg)),
                 DecRes::Ignore => (),
                 DecRes::ReqNewStream => {
@@ -130,7 +131,10 @@ impl SbdClientCrypto {
 
     /// Get the current active "connected" peers.
     pub fn active_peers(&self) -> Vec<PubKey> {
-        self.inner.lock().unwrap().c_map.keys().cloned().collect()
+        let mut inner = self.inner.lock().unwrap();
+        let max_idle = inner.config.max_idle;
+        Inner::prune(&mut inner.c_map, max_idle);
+        inner.c_map.keys().cloned().collect()
     }
 
     /// Assert that we are connected to a peer without sending any data.
@@ -223,6 +227,14 @@ impl Inner {
         self.c_map.remove(pk);
     }
 
+    fn prune(
+        c_map: &mut HashMap<PubKey, InnerRec>,
+        max_idle: std::time::Duration,
+    ) {
+        let now = std::time::Instant::now();
+        c_map.retain(|_pk, r| now - r.last_active < max_idle);
+    }
+
     fn loc_assert<'a>(
         config: &'a Config,
         c_map: &'a mut HashMap<PubKey, InnerRec>,
@@ -231,8 +243,7 @@ impl Inner {
     ) -> Result<&'a mut InnerRec> {
         use std::collections::hash_map::Entry;
         let tot = c_map.len();
-        let now = std::time::Instant::now();
-        c_map.retain(|_pk, r| now - r.last_active < config.max_idle);
+        Self::prune(c_map, config.max_idle);
         match c_map.entry(pk.clone()) {
             Entry::Vacant(e) => {
                 if do_create {
@@ -241,7 +252,7 @@ impl Inner {
                     }
                     Ok(e.insert(InnerRec::new()))
                 } else {
-                    return Err(Error::other("ignore unsolicited"));
+                    Err(Error::other("ignore unsolicited"))
                 }
             }
             Entry::Occupied(e) => Ok(e.into_mut()),
@@ -267,7 +278,7 @@ impl Inner {
 
         // assert we have an Encryptor, adding header to output as needed
         if rec.enc.is_none() {
-            let (enc, hdr) = crypto.new_enc(&**pk)?;
+            let (enc, hdr) = crypto.new_enc(pk)?;
             rec.enc = Some(enc);
             let msg = protocol::Protocol::new_stream(&**pk, &hdr);
             out.push(msg.base_msg().clone());
@@ -327,12 +338,12 @@ impl Inner {
                 match rec.dec.as_mut() {
                     Some(dec) => match dec.decrypt(message.as_ref()) {
                         Ok(message) => DecRes::Ok(message),
-                        Err(_) => return DecRes::ReqNewStream,
+                        Err(_) => DecRes::ReqNewStream,
                     },
                     None => {
                         // we don't want to entertain peers that don't
                         // properly send us a new stream first
-                        return DecRes::Ignore;
+                        DecRes::Ignore
                     }
                 }
             }
