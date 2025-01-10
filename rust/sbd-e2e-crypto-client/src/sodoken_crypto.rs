@@ -18,50 +18,44 @@ impl Encryptor {
         Ok(header)
     }
 
-    /// Encrypt a new message.
-    pub fn encrypt(&mut self, msg: &[u8]) -> Result<Vec<u8>> {
-        let mut out = vec![0; msg.len() + sodoken::secretstream::ABYTES];
+    /// Encrypt a new message. This version saves a copy by putting the
+    /// encrypted data directly into a protocol message.
+    pub fn encrypt(
+        &mut self,
+        pub_key: &[u8],
+        msg: &[u8],
+    ) -> Result<protocol::Protocol> {
+        let mut out = bytes::BytesMut::zeroed(
+            32 + 1 + msg.len() + sodoken::secretstream::ABYTES,
+        );
+        out[..32].copy_from_slice(&pub_key[..32]);
+        out[32] = protocol::T_MESSAGE;
+
         sodoken::secretstream::push(
             &mut self.state,
             msg,
             None,
             sodoken::secretstream::Tag::Message,
-            &mut out,
+            &mut out[33..],
         )?;
-        Ok(out)
+
+        // unwrap okay since we are constructing this
+        Ok(protocol::Protocol::from_full(out.freeze()).unwrap())
     }
 }
 
 /// Secret stream decryptor.
 pub struct Decryptor {
-    sk: sodoken::LockedArray<32>,
     state: sodoken::secretstream::State,
 }
 
 impl Decryptor {
-    /// Decrypt a new message.
-    pub fn decrypt(&mut self, msg: &[u8]) -> Result<Option<Vec<u8>>> {
-        let mut out = vec![0; msg.len() - sodoken::secretstream::ABYTES];
-        match sodoken::secretstream::pull(&mut self.state, &mut out, msg, None)
-        {
-            Ok(_) => return Ok(Some(out)),
-            Err(_) => {
-                if msg.len() == 24 {
-                    let mut header = [0; 24];
-                    header.copy_from_slice(msg);
-                    if sodoken::secretstream::init_pull(
-                        &mut self.state,
-                        &header,
-                        &self.sk.lock(),
-                    )
-                    .is_ok()
-                    {
-                        return Ok(None);
-                    }
-                }
-            }
-        }
-        Err(Error::other("decryption failure"))
+    /// Decrypt a new message into [bytes::Bytes].
+    pub fn decrypt(&mut self, msg: &[u8]) -> Result<bytes::Bytes> {
+        let mut out =
+            bytes::BytesMut::zeroed(msg.len() - sodoken::secretstream::ABYTES);
+        sodoken::secretstream::pull(&mut self.state, &mut out[..], msg, None)?;
+        Ok(out.freeze())
     }
 }
 
@@ -104,11 +98,10 @@ impl SodokenCrypto {
         }
     }
 
-    /// Construct a new encryption / decryption pair for given remote peer.
-    pub fn new_enc(
+    fn session(
         &self,
         peer_sign_pk: &[u8; 32],
-    ) -> Result<(Encryptor, [u8; 24], Decryptor)> {
+    ) -> Result<(sodoken::LockedArray<32>, sodoken::LockedArray<32>)> {
         let mut peer_enc_pk = [0; 32];
         sodoken::sign::pk_to_curve25519(&mut peer_enc_pk, peer_sign_pk)?;
 
@@ -133,6 +126,16 @@ impl SodokenCrypto {
             )?;
         }
 
+        Ok((rx, tx))
+    }
+
+    /// Construct a new encryptor for a peer connection.
+    pub fn new_enc(
+        &self,
+        peer_sign_pk: &[u8; 32],
+    ) -> Result<(Encryptor, [u8; 24])> {
+        let (_rx, tx) = self.session(peer_sign_pk)?;
+
         let mut enc = Encryptor {
             sk: tx,
             state: sodoken::secretstream::State::default(),
@@ -140,14 +143,27 @@ impl SodokenCrypto {
 
         let hdr = enc.init()?;
 
-        Ok((
-            enc,
-            hdr,
-            Decryptor {
-                sk: rx,
-                state: sodoken::secretstream::State::default(),
-            },
-        ))
+        Ok((enc, hdr))
+    }
+
+    /// Construct a new decryptor for a peer connection.
+    pub fn new_dec(
+        &self,
+        peer_sign_pk: &[u8],
+        hdr: &[u8],
+    ) -> Result<Decryptor> {
+        let mut pk = [0; 32];
+        pk.copy_from_slice(&peer_sign_pk[..32]);
+        let (mut rx, _tx) = self.session(&pk)?;
+
+        let mut state = sodoken::secretstream::State::default();
+
+        let mut header = [0; 24];
+        header.copy_from_slice(&hdr[..24]);
+
+        sodoken::secretstream::init_pull(&mut state, &header, &rx.lock())?;
+
+        Ok(Decryptor { state })
     }
 }
 

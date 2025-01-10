@@ -11,6 +11,7 @@ version = "0.0.8-alpha"
 edition = "2021"
 
 [dependencies]
+bytes = { workspace = true }
 sbd-client = { workspace = true }
 sodoken = { workspace = true }
 tokio = { workspace = true }
