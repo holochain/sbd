@@ -72,7 +72,7 @@ pub enum Protocol {
         message: bytes::Bytes,
     },
 
-    /// Request for a new descryption stream state.
+    /// Request for a new decryption stream state.
     RequestNewStream {
         #[allow(missing_docs)]
         full: bytes::Bytes,
@@ -237,7 +237,7 @@ mod test {
     }
 
     #[test]
-    fn other() {
+    fn invalid_type() {
         let mut exp_other = bytes::BytesMut::new();
         exp_other.extend_from_slice(PUB_KEY);
         exp_other.extend_from_slice(&[0x42]);

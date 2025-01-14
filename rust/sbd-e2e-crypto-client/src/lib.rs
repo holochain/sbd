@@ -42,8 +42,8 @@ impl Default for Config {
     }
 }
 
-// tokio mutex required to ensure ordering on new stream messages
-// we can't send in parallel over the same sub-client anyways.
+// tokio mutex required to ensure ordering on new stream messages.
+// We can't send in parallel over the same sub-client anyways.
 type ClientSync = tokio::sync::Mutex<sbd_client::SbdClient>;
 
 /// Handle to receive data from the crypto connection.
