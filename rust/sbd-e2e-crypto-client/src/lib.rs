@@ -155,9 +155,11 @@ impl SbdClientCrypto {
     pub async fn send(&self, pk: &PubKey, msg: &[u8]) -> Result<()> {
         const SBD_MAX: usize = 20_000;
         const SBD_HDR: usize = 32;
-        const SBD_P_HDR: usize = 1;
+        // This is the internal "secretstream" header for distinguishing
+        // stream starts and messages, etc.
+        const SBD_SS_HDR: usize = 1;
         const SS_ABYTES: usize = sodoken::secretstream::ABYTES;
-        const MAX_MSG: usize = SBD_MAX - SBD_HDR - SBD_P_HDR - SS_ABYTES;
+        const MAX_MSG: usize = SBD_MAX - SBD_HDR - SBD_SS_HDR - SS_ABYTES;
 
         if msg.len() > MAX_MSG {
             return Err(Error::other("message too long"));
