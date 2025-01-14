@@ -8,7 +8,6 @@ impl Cfg {
         Self(Config {
             listener: true,
             allow_plain_text: true,
-            cooldown: tokio::time::Duration::from_secs(1),
             max_connections: 100,
             max_idle: tokio::time::Duration::from_secs(10),
         })
@@ -21,11 +20,6 @@ impl Cfg {
 
     pub fn max(mut self, max: usize) -> Self {
         self.0.max_connections = max;
-        self
-    }
-
-    pub fn cool(mut self, cool: std::time::Duration) -> Self {
-        self.0.cooldown = cool;
         self
     }
 
@@ -77,11 +71,11 @@ async fn sanity() {
 
     let (rk, rm) = r1.recv().await.unwrap();
     assert_eq!(c2.pub_key(), &rk);
-    assert_eq!(b"hello", rm.as_slice());
+    assert_eq!(b"hello", rm.as_ref());
 
     let (rk, rm) = r2.recv().await.unwrap();
     assert_eq!(c1.pub_key(), &rk);
-    assert_eq!(b"world", rm.as_slice());
+    assert_eq!(b"world", rm.as_ref());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -174,149 +168,33 @@ async fn max_msg_size() {
         (20_000, false),
         (19_968, false),
         (19_952, false),
-        (19_951, true),
+        (19_951, false),
+        (19_950, true),
     ] {
-        assert_eq!(is_ok, c2.send(c1.pub_key(), &MSG[..size]).await.is_ok())
+        let res = c2.send(c1.pub_key(), &MSG[..size]).await;
+        assert_eq!(is_ok, res.is_ok())
     }
 
     let (_, r) = r1.recv().await.unwrap();
-    assert_eq!(&MSG[..19_951], r.as_slice());
+    assert_eq!(&MSG[..19_950], r.as_ref());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn cooldown_config_works_from_send_side() {
-    let test = Test::new().await;
+async fn idle_close_connections() {
+    const DUR: std::time::Duration = std::time::Duration::from_millis(500);
 
-    let ((c1, mut r1), (c2, _r2), (c3, _r3)) = tokio::join!(
-        test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
-        test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
-        test.conn(Cfg::d().cool(std::time::Duration::from_secs(5000))),
-    );
-
-    tokio::try_join!(
-        c2.send(c1.pub_key(), b"msg-a"),
-        c3.send(c1.pub_key(), b"msg-b"),
-    )
-    .unwrap();
-
-    let (_, r) = r1.recv().await.unwrap();
-    assert!(r == b"msg-a" || r == b"msg-b");
-    let (_, r) = r1.recv().await.unwrap();
-    assert!(r == b"msg-a" || r == b"msg-b");
-
-    c2.close_peer(c1.pub_key()).await;
-    c3.close_peer(c1.pub_key()).await;
-
-    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-
-    assert!(c3.send(c1.pub_key(), b"msg-c").await.is_err());
-    assert!(c2.send(c1.pub_key(), b"msg-d").await.is_ok());
-
-    let (_, r) = r1.recv().await.unwrap();
-    assert!(r == b"msg-d");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn cooldown_config_works_from_recv_side() {
-    let test = Test::new().await;
-
-    let ((c1, mut r1), (c2, mut r2), (c3, _r3)) = tokio::join!(
-        test.conn(Cfg::d().cool(std::time::Duration::from_secs(5000))),
-        test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
-        test.conn(Cfg::d().cool(std::time::Duration::from_millis(1))),
-    );
-
-    tokio::try_join!(
-        c3.send(c1.pub_key(), b"msg-a"),
-        c3.send(c2.pub_key(), b"msg-b"),
-    )
-    .unwrap();
-
-    let (_, r) = r1.recv().await.unwrap();
-    assert_eq!(b"msg-a", r.as_slice());
-    let (_, r) = r2.recv().await.unwrap();
-    assert_eq!(b"msg-b", r.as_slice());
-
-    c1.close_peer(c3.pub_key()).await;
-    c2.close_peer(c3.pub_key()).await;
-
-    // note we have to close the send side too, or it won't re-init crypto
-    c3.close_peer(c1.pub_key()).await;
-    c3.close_peer(c2.pub_key()).await;
-
-    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-
-    tokio::try_join!(
-        c3.send(c1.pub_key(), b"msg-c"),
-        c3.send(c2.pub_key(), b"msg-d"),
-    )
-    .unwrap();
-
-    let (_, r) = r2.recv().await.unwrap();
-    assert_eq!(b"msg-d", r.as_slice());
-
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(1), r1.recv())
-            .await
-            .is_err()
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn idle_close_even_if_sending() {
-    let (took, exited_early) =
-        idle_close_even_if_sending_inner(std::time::Duration::from_secs(5000))
-            .await;
-    assert!(!exited_early);
-    let iter_millis = took.as_millis() as u64 / 20;
-    println!("1 iter took: {} millis", iter_millis);
-
-    // let's try to have it close right in the middle of the run
-    let (_took, exited_early) = idle_close_even_if_sending_inner(
-        std::time::Duration::from_millis(iter_millis * 10),
-    )
-    .await;
-    assert!(exited_early);
-}
-
-async fn idle_close_even_if_sending_inner(
-    idle_dur: std::time::Duration,
-) -> (std::time::Duration, bool) {
     let test = Test::new().await;
 
     let ((c1, mut r1), (c2, _r2)) = tokio::join!(
-        test.conn(Cfg::d().idle(idle_dur)),
-        test.conn(Cfg::d().idle(idle_dur)),
+        test.conn(Cfg::d().idle(DUR)),
+        test.conn(Cfg::d().idle(DUR)),
     );
 
-    c2.send(c1.pub_key(), b"").await.unwrap();
+    c2.send(c1.pub_key(), b"wabonb").await.unwrap();
     let _ = r1.recv().await.unwrap();
 
-    let mut exited_early = false;
+    tokio::time::sleep(DUR * 2).await;
 
-    let start = tokio::time::Instant::now();
-    for i in 0..20 {
-        let istart = tokio::time::Instant::now();
-        if c2.send(c1.pub_key(), &[i]).await.is_err() {
-            exited_early = true;
-            break;
-        }
-        match tokio::time::timeout(std::time::Duration::from_secs(1), r1.recv())
-            .await
-        {
-            Err(_) | Ok(None) => {
-                exited_early = true;
-                break;
-            }
-            Ok(Some((_, r))) => {
-                assert_eq!(&[i], r.as_slice());
-            }
-        }
-        let ielapsed = istart.elapsed();
-        let ten = std::time::Duration::from_millis(10);
-        if ielapsed < ten {
-            tokio::time::sleep(ten - ielapsed).await;
-        }
-    }
-    (start.elapsed(), exited_early)
+    assert_eq!(0, c1.active_peers().len());
+    assert_eq!(0, c2.active_peers().len());
 }

@@ -1,19 +1,15 @@
-//! Sbd end to end encryption client.
 #![deny(missing_docs)]
-
-// Mutex strategy in this file is built on the assumption that this will
-// largely be network bound. Since we only have the one rate-limited connection
-// to the sbd server, it is okay to wrap it with a tokio Mutex and do the
-// encryption / decryption while that mutex is locked. Without this top-level
-// locking it is much easier to send secretstream headers out of order,
-// especially on the receiving new connection side when a naive implementation
-// trying to be clever might not lock the send side correctly.
+//! Sbd end to end encryption client.
+//!
+//! See the [protocol] module documentation for spec details.
 
 use std::collections::HashMap;
 use std::io::{Error, Result};
 use std::sync::{Arc, Mutex, Weak};
 
 pub use sbd_client::PubKey;
+
+pub mod protocol;
 
 mod sodoken_crypto;
 pub use sodoken_crypto::*;
@@ -28,9 +24,6 @@ pub struct Config {
     /// If `true` we will allow connecting to insecure plaintext servers.
     pub allow_plain_text: bool,
 
-    /// Cooldown time to prevent comms on "connection" close.
-    pub cooldown: std::time::Duration,
-
     /// Max connection count.
     pub max_connections: usize,
 
@@ -43,279 +36,57 @@ impl Default for Config {
         Self {
             listener: false,
             allow_plain_text: false,
-            cooldown: std::time::Duration::from_secs(10),
             max_connections: 4096,
             max_idle: std::time::Duration::from_secs(10),
         }
     }
 }
 
-enum Conn {
-    Cooldown(tokio::time::Instant),
-    Active {
-        last_active: tokio::time::Instant,
-        enc: sodoken_crypto::Encryptor,
-        dec: sodoken_crypto::Decryptor,
-    },
-}
-
-struct Inner {
-    config: Arc<Config>,
-    crypto: sodoken_crypto::SodokenCrypto,
-    client: sbd_client::SbdClient,
-    map: HashMap<PubKey, Conn>,
-}
-
-fn do_close_peer(pk: &PubKey, conn: &mut Conn, cooldown: std::time::Duration) {
-    tracing::debug!(
-        target: "NETAUDIT",
-        pub_key = ?pk,
-        cooldown_s = cooldown.as_secs_f64(),
-        m = "sbd-e2e-crypto-client",
-        a = "close_peer",
-    );
-    *conn = Conn::Cooldown(tokio::time::Instant::now() + cooldown);
-}
-
-impl Inner {
-    pub async fn close(&mut self) {
-        self.client.close().await;
-    }
-
-    pub fn close_peer(&mut self, pk: &PubKey) {
-        if let Some(conn) = self.map.get_mut(pk) {
-            do_close_peer(pk, conn, self.config.cooldown);
-        }
-    }
-
-    pub async fn assert(&mut self, pk: &PubKey) -> Result<()> {
-        let Self {
-            config,
-            crypto,
-            client,
-            map,
-        } = self;
-
-        let (conn, hdr) = Self::priv_assert_con(pk, config, crypto, map, true)?;
-
-        match conn {
-            Conn::Cooldown(_) => {
-                Err(Error::other("connection still cooling down"))
-            }
-            Conn::Active { .. } => {
-                if let Err(err) = async {
-                    if let Some(hdr) = hdr {
-                        client.send(pk, &hdr).await
-                    } else {
-                        Ok(())
-                    }
-                }
-                .await
-                {
-                    do_close_peer(pk, conn, config.cooldown);
-                    Err(err)
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    pub async fn recv(
-        &mut self,
-        msg: sbd_client::Msg,
-    ) -> Result<Option<(PubKey, Vec<u8>)>> {
-        let Self {
-            config,
-            crypto,
-            client,
-            map,
-        } = self;
-
-        let pk = msg.pub_key();
-
-        match Self::priv_assert_con(&pk, config, crypto, map, config.listener) {
-            Err(_) => Ok(None),
-            Ok((conn, hdr)) => {
-                if let Some(hdr) = hdr {
-                    client.send(&pk, &hdr).await?;
-                }
-
-                match conn {
-                    Conn::Cooldown(_) => Ok(None),
-                    Conn::Active {
-                        last_active, dec, ..
-                    } => {
-                        *last_active = tokio::time::Instant::now();
-
-                        match dec.decrypt(msg.message()) {
-                            Err(_) => {
-                                do_close_peer(&pk, conn, config.cooldown);
-                                Ok(None)
-                            }
-                            Ok(None) => Ok(None),
-                            Ok(Some(msg)) => Ok(Some((pk, msg))),
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub async fn send(&mut self, pk: &PubKey, msg: &[u8]) -> Result<()> {
-        let Self {
-            config,
-            crypto,
-            client,
-            map,
-        } = self;
-
-        let (conn, hdr) = Self::priv_assert_con(pk, config, crypto, map, true)?;
-
-        match conn {
-            Conn::Cooldown(_) => {
-                Err(Error::other("connection still cooling down"))
-            }
-            Conn::Active { enc, .. } => {
-                if let Err(err) = async {
-                    if let Some(hdr) = hdr {
-                        client.send(pk, &hdr).await?;
-                    }
-                    let msg = enc.encrypt(msg)?;
-                    client.send(pk, &msg).await
-                }
-                .await
-                {
-                    do_close_peer(pk, conn, config.cooldown);
-                    Err(err)
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    fn prune(config: &Config, map: &mut HashMap<PubKey, Conn>) {
-        let now = tokio::time::Instant::now();
-
-        map.retain(|pk, c| {
-            if let Conn::Active { last_active, .. } = c {
-                if now - *last_active > config.max_idle {
-                    do_close_peer(pk, c, config.cooldown);
-                }
-            }
-
-            if let Conn::Cooldown(at) = c {
-                now < *at
-            } else {
-                true
-            }
-        })
-    }
-
-    fn priv_assert_con<'a>(
-        pk: &PubKey,
-        config: &Config,
-        crypto: &sodoken_crypto::SodokenCrypto,
-        map: &'a mut HashMap<PubKey, Conn>,
-        do_create: bool,
-    ) -> Result<(&'a mut Conn, Option<[u8; 24]>)> {
-        use std::collections::hash_map::Entry;
-
-        // TODO - more efficient to only prune if we need to
-        //        but then, we'd need to manage expired cooldowns
-        //        in-line, lest we keep denying connections
-        //if map.len() >= config.max_connections {
-        //    Self::prune(config, map);
-        //}
-        // instead, for now, we just always prune
-        Self::prune(config, map);
-
-        let len = map.len();
-
-        match map.entry(pk.clone()) {
-            Entry::Occupied(e) => Ok((e.into_mut(), None)),
-            Entry::Vacant(e) => {
-                if !do_create {
-                    return Err(Error::other("ignore"));
-                }
-                if len >= config.max_connections {
-                    tracing::debug!(
-                        target: "NETAUDIT",
-                        pub_key = ?pk,
-                        m = "sbd-e2e-crypto-client",
-                        "cannot open: too many connections",
-                    );
-                    return Err(Error::other("too many connections"));
-                }
-                tracing::debug!(
-                    target: "NETAUDIT",
-                    pub_key = ?pk,
-                    m = "sbd-e2e-crypto-client",
-                    a = "open_peer",
-                );
-                let (enc, hdr, dec) = crypto.new_enc(pk)?;
-                Ok((
-                    e.insert(Conn::Active {
-                        last_active: tokio::time::Instant::now(),
-                        enc,
-                        dec,
-                    }),
-                    Some(hdr),
-                ))
-            }
-        }
-    }
-}
-
-async fn close_inner(inner: &mut Option<Inner>) {
-    if let Some(mut inner) = inner.take() {
-        inner.close().await;
-    }
-}
+// tokio mutex required to ensure ordering on new stream messages.
+// We can't send in parallel over the same sub-client anyways.
+type ClientSync = tokio::sync::Mutex<sbd_client::SbdClient>;
 
 /// Handle to receive data from the crypto connection.
 pub struct MsgRecv {
-    inner: Weak<tokio::sync::Mutex<Option<Inner>>>,
+    inner: Arc<Mutex<Inner>>,
     recv: sbd_client::MsgRecv,
+    client: Weak<ClientSync>,
 }
 
 impl MsgRecv {
     /// Receive data from the crypto connection.
-    pub async fn recv(&mut self) -> Option<(PubKey, Vec<u8>)> {
-        loop {
-            let raw_msg = match self.recv.recv().await {
-                None => return None,
-                Some(raw_msg) => raw_msg,
-            };
-
-            if let Some(inner) = self.inner.upgrade() {
-                let mut lock = inner.lock().await;
-
-                if let Some(inner) = &mut *lock {
-                    match inner.recv(raw_msg).await {
-                        Err(_) => (),
-                        Ok(None) => continue,
-                        Ok(Some(o)) => return Some(o),
+    pub async fn recv(&mut self) -> Option<(PubKey, bytes::Bytes)> {
+        while let Some(msg) = self.recv.recv().await {
+            let pk = msg.pub_key();
+            let dec = self.inner.lock().unwrap().dec(msg);
+            match dec {
+                DecRes::Ok(msg) => return Some((pk, msg)),
+                DecRes::Ignore => (),
+                DecRes::ReqNewStream => {
+                    // error decoding, we need to request a new stream
+                    if let Some(client) = self.client.upgrade() {
+                        let msg =
+                            protocol::Protocol::request_new_stream(&*pk.0);
+                        if let Err(err) =
+                            client.lock().await.send(&pk, msg.base_msg()).await
+                        {
+                            tracing::debug!(?err, "failure sending request_new_stream in message receive handler");
+                        }
+                    } else {
+                        return None;
                     }
-                } else {
-                    return None;
                 }
-
-                // the only code path leading out of the branches above
-                // is the error one where we need to close the connection
-                close_inner(&mut lock).await;
-            } else {
-                return None;
             }
         }
+        None
     }
 }
 
 /// An encrypted connection to peers through an Sbd server.
 pub struct SbdClientCrypto {
     pub_key: PubKey,
-    inner: Arc<tokio::sync::Mutex<Option<Inner>>>,
+    inner: Arc<Mutex<Inner>>,
+    client: Arc<ClientSync>,
 }
 
 impl SbdClientCrypto {
@@ -334,20 +105,23 @@ impl SbdClientCrypto {
         let (client, recv) =
             sbd_client::SbdClient::connect_config(url, &crypto, client_config)
                 .await?;
-        let inner = Arc::new(tokio::sync::Mutex::new(Some(Inner {
-            config,
-            crypto,
+
+        let client = Arc::new(tokio::sync::Mutex::new(client));
+        let inner = Arc::new(Mutex::new(Inner::new(config, crypto)));
+
+        let recv = MsgRecv {
+            inner: inner.clone(),
+            recv,
+            client: Arc::downgrade(&client),
+        };
+
+        let this = Self {
+            pub_key,
+            inner,
             client,
-            map: HashMap::default(),
-        })));
-        let weak_inner = Arc::downgrade(&inner);
-        Ok((
-            Self { pub_key, inner },
-            MsgRecv {
-                inner: weak_inner,
-                recv,
-            },
-        ))
+        };
+
+        Ok((this, recv))
     }
 
     /// Get the public key of this node.
@@ -355,45 +129,231 @@ impl SbdClientCrypto {
         &self.pub_key
     }
 
+    /// Get the current active "connected" peers.
+    pub fn active_peers(&self) -> Vec<PubKey> {
+        let mut inner = self.inner.lock().unwrap();
+        let max_idle = inner.config.max_idle;
+        Inner::prune(&mut inner.c_map, max_idle);
+        inner.c_map.keys().cloned().collect()
+    }
+
     /// Assert that we are connected to a peer without sending any data.
     pub async fn assert(&self, pk: &PubKey) -> Result<()> {
-        let mut lock = self.inner.lock().await;
-        if let Some(inner) = &mut *lock {
-            inner.assert(pk).await
-        } else {
-            Err(Error::other("closed"))
+        let enc = self.inner.lock().unwrap().enc(pk, None)?;
+
+        {
+            let client = self.client.lock().await;
+            for enc in enc {
+                client.send(pk, &enc).await?;
+            }
         }
+
+        Ok(())
     }
 
     /// Send a message to a peer.
     pub async fn send(&self, pk: &PubKey, msg: &[u8]) -> Result<()> {
         const SBD_MAX: usize = 20_000;
         const SBD_HDR: usize = 32;
+        // This is the internal "secretstream" header for distinguishing
+        // stream starts and messages, etc.
+        const SBD_SS_HDR: usize = 1;
         const SS_ABYTES: usize = sodoken::secretstream::ABYTES;
-        const MAX_MSG: usize = SBD_MAX - SBD_HDR - SS_ABYTES;
+        const MAX_MSG: usize = SBD_MAX - SBD_HDR - SBD_SS_HDR - SS_ABYTES;
 
         if msg.len() > MAX_MSG {
             return Err(Error::other("message too long"));
         }
 
-        let mut lock = self.inner.lock().await;
-        if let Some(inner) = &mut *lock {
-            inner.send(pk, msg).await
-        } else {
-            Err(Error::other("closed"))
+        let enc = self.inner.lock().unwrap().enc(pk, Some(msg))?;
+
+        {
+            let client = self.client.lock().await;
+            for enc in enc {
+                client.send(pk, &enc).await?;
+            }
         }
+
+        Ok(())
     }
 
     /// Close a connection to a specific peer.
     pub async fn close_peer(&self, pk: &PubKey) {
-        if let Some(inner) = self.inner.lock().await.as_mut() {
-            inner.close_peer(pk);
-        }
+        self.inner.lock().unwrap().close(pk);
     }
 
     /// Close the entire sbd client connection.
     pub async fn close(&self) {
-        close_inner(&mut *self.inner.lock().await).await;
+        self.client.lock().await.close().await;
+    }
+}
+
+enum DecRes {
+    Ok(bytes::Bytes),
+    Ignore,
+    ReqNewStream,
+}
+
+struct InnerRec {
+    enc: Option<Encryptor>,
+    dec: Option<Decryptor>,
+    last_active: std::time::Instant,
+}
+
+impl InnerRec {
+    pub fn new() -> Self {
+        Self {
+            enc: None,
+            dec: None,
+            last_active: std::time::Instant::now(),
+        }
+    }
+}
+
+struct Inner {
+    config: Arc<Config>,
+    crypto: SodokenCrypto,
+    c_map: HashMap<PubKey, InnerRec>,
+}
+
+impl Inner {
+    fn new(config: Arc<Config>, crypto: SodokenCrypto) -> Self {
+        Self {
+            config,
+            crypto,
+            c_map: HashMap::new(),
+        }
+    }
+
+    fn close(&mut self, pk: &PubKey) {
+        self.c_map.remove(pk);
+    }
+
+    fn prune(
+        c_map: &mut HashMap<PubKey, InnerRec>,
+        max_idle: std::time::Duration,
+    ) {
+        let now = std::time::Instant::now();
+        c_map.retain(|_pk, r| now - r.last_active < max_idle);
+    }
+
+    fn loc_assert<'a>(
+        config: &'a Config,
+        c_map: &'a mut HashMap<PubKey, InnerRec>,
+        pk: PubKey,
+        do_create: bool,
+    ) -> Result<&'a mut InnerRec> {
+        use std::collections::hash_map::Entry;
+        let tot = c_map.len();
+        Self::prune(c_map, config.max_idle);
+        match c_map.entry(pk.clone()) {
+            Entry::Vacant(e) => {
+                if do_create {
+                    if tot >= config.max_connections {
+                        return Err(Error::other("too many connections"));
+                    }
+                    Ok(e.insert(InnerRec::new()))
+                } else {
+                    Err(Error::other("ignore unsolicited"))
+                }
+            }
+            Entry::Occupied(e) => Ok(e.into_mut()),
+        }
+    }
+
+    fn enc(
+        &mut self,
+        pk: &PubKey,
+        msg: Option<&[u8]>,
+    ) -> Result<Vec<bytes::Bytes>> {
+        let Self {
+            config,
+            crypto,
+            c_map,
+        } = self;
+
+        let mut out = Vec::new();
+
+        // assert we have a record for the pubkey
+        let rec = Self::loc_assert(config, c_map, pk.clone(), true)?;
+        rec.last_active = std::time::Instant::now();
+
+        // assert we have an Encryptor, adding header to output as needed
+        if rec.enc.is_none() {
+            let (enc, hdr) = crypto.new_enc(pk)?;
+            rec.enc = Some(enc);
+            let msg = protocol::Protocol::new_stream(&**pk, &hdr);
+            out.push(msg.base_msg().clone());
+        }
+
+        if let Some(msg) = msg {
+            // encrypt our message
+            let msg = rec.enc.as_mut().unwrap().encrypt(&*pk.0, msg)?;
+
+            out.push(msg.base_msg().clone());
+        }
+
+        Ok(out)
+    }
+
+    fn dec(&mut self, msg: sbd_client::Msg) -> DecRes {
+        let Self {
+            config,
+            crypto,
+            c_map,
+        } = self;
+        let rec = match Self::loc_assert(
+            config,
+            c_map,
+            msg.pub_key(),
+            config.listener,
+        ) {
+            Ok(rec) => rec,
+            Err(_) => {
+                // too many connections, or unsolicited... ignore this message
+                return DecRes::Ignore;
+            }
+        };
+        rec.last_active = std::time::Instant::now();
+        let dec = match protocol::Protocol::from_full(
+            bytes::Bytes::copy_from_slice(&msg.0),
+        ) {
+            Some(dec) => dec,
+            None => {
+                rec.dec = None;
+                // cannot decode, request a new stream
+                // MAYBE track these too so we ban bad actors?
+                return DecRes::ReqNewStream;
+            }
+        };
+        match dec {
+            protocol::Protocol::NewStream { header, .. } => {
+                let dec =
+                    match crypto.new_dec(msg.pub_key_ref(), header.as_ref()) {
+                        Ok(dec) => dec,
+                        Err(_) => return DecRes::ReqNewStream,
+                    };
+                rec.dec = Some(dec);
+                DecRes::Ignore
+            }
+            protocol::Protocol::Message { message, .. } => {
+                match rec.dec.as_mut() {
+                    Some(dec) => match dec.decrypt(message.as_ref()) {
+                        Ok(message) => DecRes::Ok(message),
+                        Err(_) => DecRes::ReqNewStream,
+                    },
+                    None => {
+                        // we don't want to entertain peers that don't
+                        // properly send us a new stream first
+                        DecRes::Ignore
+                    }
+                }
+            }
+            protocol::Protocol::RequestNewStream { .. } => {
+                rec.enc = None;
+                DecRes::Ignore
+            }
+        }
     }
 }
 
