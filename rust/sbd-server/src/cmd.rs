@@ -36,15 +36,15 @@ pub(crate) const CMD_PREFIX: &[u8; 28] = &[0; 28];
 /// - `lidl` limit_idle_millis(i32)
 /// - `areq` auth_req(nonce)
 /// - `srdy` ready()
-pub enum SbdCmd<'c> {
-    Message(Payload<'c>),
+pub enum SbdCmd {
+    Message(Payload),
     Keepalive,
     AuthRes([u8; SIG_SIZE]),
     Unknown,
 }
 
-impl<'c> SbdCmd<'c> {
-    pub fn parse(payload: Payload<'c>) -> Result<Self> {
+impl SbdCmd {
+    pub fn parse(payload: Payload) -> Result<Self> {
         if payload.as_ref().len() < HDR_SIZE {
             return Err(Error::other("invalid payload length"));
         }
@@ -69,8 +69,8 @@ impl<'c> SbdCmd<'c> {
     }
 }
 
-impl SbdCmd<'_> {
-    pub fn limit_byte_nanos(limit_byte_nanos: i32) -> Payload<'static> {
+impl SbdCmd {
+    pub fn limit_byte_nanos(limit_byte_nanos: i32) -> Payload {
         let mut out = Vec::with_capacity(HDR_SIZE + 4);
         let n = limit_byte_nanos.to_be_bytes();
         out.extend_from_slice(CMD_PREFIX);
@@ -79,7 +79,7 @@ impl SbdCmd<'_> {
         Payload::Vec(out)
     }
 
-    pub fn limit_idle_millis(limit_idle_millis: i32) -> Payload<'static> {
+    pub fn limit_idle_millis(limit_idle_millis: i32) -> Payload {
         let mut out = Vec::with_capacity(HDR_SIZE + 4);
         let n = limit_idle_millis.to_be_bytes();
         out.extend_from_slice(CMD_PREFIX);
@@ -88,7 +88,7 @@ impl SbdCmd<'_> {
         Payload::Vec(out)
     }
 
-    pub fn auth_req(nonce: &[u8; 32]) -> Payload<'static> {
+    pub fn auth_req(nonce: &[u8; 32]) -> Payload {
         let mut out = Vec::with_capacity(HDR_SIZE + NONCE_SIZE);
         out.extend_from_slice(CMD_PREFIX);
         out.extend_from_slice(F_AUTH_REQ);
@@ -96,8 +96,8 @@ impl SbdCmd<'_> {
         Payload::Vec(out)
     }
 
-    pub fn ready() -> Payload<'static> {
-        Payload::Slice(&[
+    pub fn ready() -> Payload {
+        Payload::Vec(vec![
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, b's', b'r', b'd', b'y',
         ])
