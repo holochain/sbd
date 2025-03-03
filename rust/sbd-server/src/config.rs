@@ -8,7 +8,7 @@ const DEF_LIMIT_IP_BYTE_BURST: i32 = 16 * 16 * 1024;
 const DEF_LIMIT_IDLE_MILLIS: i32 = 10_000;
 
 /// Configure and execute an SBD server.
-#[derive(clap::Parser, Debug)]
+#[derive(clap::Parser, Debug, Clone)]
 #[command(version, styles=get_styles())]
 pub struct Config {
     /// TLS certificate path (pem).

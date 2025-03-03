@@ -15,7 +15,7 @@ enum TaskMsg {
     NewWs {
         uniq: u64,
         index: usize,
-        ws: Arc<ws::WebSocket<MaybeTlsStream>>,
+        ws: Arc<dyn SbdWebsocket>,
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
     },
@@ -29,7 +29,7 @@ struct SlotEntry {
 struct SlabEntry {
     uniq: u64,
     handshake_complete: bool,
-    weak_ws: Weak<ws::WebSocket<MaybeTlsStream>>,
+    weak_ws: Weak<dyn SbdWebsocket>,
 }
 
 struct CSlotInner {
@@ -49,19 +49,23 @@ impl Drop for CSlotInner {
     }
 }
 
+/// A weak reference to a connection slot container.
 #[derive(Clone)]
 pub struct WeakCSlot(Weak<Mutex<CSlotInner>>);
 
 impl WeakCSlot {
+    /// Upgrade this weak reference to a strong reference.
     pub fn upgrade(&self) -> Option<CSlot> {
         self.0.upgrade().map(CSlot)
     }
 }
 
+/// A connection slot container.
 pub struct CSlot(Arc<Mutex<CSlotInner>>);
 
 impl CSlot {
-    pub fn new(config: Arc<Config>, ip_rate: Arc<ip_rate::IpRate>) -> Self {
+    /// Create a new connection slot container.
+    pub fn new(config: Arc<Config>, ip_rate: Arc<IpRate>) -> Self {
         let count = config.limit_clients as usize;
         Self(Arc::new_cyclic(|this| {
             let mut slots = Vec::with_capacity(count);
@@ -87,6 +91,7 @@ impl CSlot {
         }))
     }
 
+    /// Get a weak reference to this connection slot container.
     pub fn weak(&self) -> WeakCSlot {
         WeakCSlot(Arc::downgrade(&self.0))
     }
@@ -118,10 +123,10 @@ impl CSlot {
         &self,
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
-        ws: Arc<ws::WebSocket<MaybeTlsStream>>,
+        ws: Arc<dyn SbdWebsocket>,
     ) -> std::result::Result<
-        Vec<(u64, usize, Weak<ws::WebSocket<MaybeTlsStream>>)>,
-        Arc<ws::WebSocket<MaybeTlsStream>>,
+        Vec<(u64, usize, Weak<dyn SbdWebsocket>)>,
+        Arc<dyn SbdWebsocket>,
     > {
         let mut lock = self.0.lock().unwrap();
 
@@ -183,12 +188,13 @@ impl CSlot {
         Ok(rate_send_list)
     }
 
+    /// Insert a connection to be managed by this container.
     pub async fn insert(
         &self,
         config: &Config,
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
-        ws: Arc<ws::WebSocket<MaybeTlsStream>>,
+        ws: Arc<impl SbdWebsocket>,
     ) {
         let rate_send_list = self.insert_and_get_rate_send_list(ip, pk, ws);
 
@@ -236,7 +242,7 @@ impl CSlot {
     fn get_sender(
         &self,
         pk: &PubKey,
-    ) -> Result<(u64, usize, Arc<ws::WebSocket<MaybeTlsStream>>)> {
+    ) -> Result<(u64, usize, Arc<dyn SbdWebsocket>)> {
         let lock = self.0.lock().unwrap();
 
         let index = match lock.pk_to_index.get(pk) {
@@ -259,7 +265,7 @@ impl CSlot {
         Ok((uniq, index, ws))
     }
 
-    async fn send(&self, pk: &PubKey, payload: Payload<'_>) -> Result<()> {
+    async fn send(&self, pk: &PubKey, payload: Payload) -> Result<()> {
         let (uniq, index, ws) = self.get_sender(pk)?;
 
         match ws.send(payload).await {
@@ -328,7 +334,7 @@ async fn ws_task(
     config: &Arc<Config>,
     ip_rate: &ip_rate::IpRate,
     weak_cslot: &WeakCSlot,
-    ws: &Arc<ws::WebSocket<MaybeTlsStream>>,
+    ws: &Arc<dyn SbdWebsocket>,
     ip: Arc<std::net::Ipv6Addr>,
     pk: PubKey,
     uniq: u64,

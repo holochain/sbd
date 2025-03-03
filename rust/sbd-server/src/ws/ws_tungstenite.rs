@@ -1,5 +1,6 @@
 use super::Payload;
 use crate::*;
+use futures::future::BoxFuture;
 use std::io::{Error, Result};
 use std::sync::Arc;
 
@@ -8,15 +9,31 @@ pub struct WebSocket<S>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    write: tokio::sync::Mutex<
-        futures::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<S>,
-            tokio_tungstenite::tungstenite::protocol::Message,
+    write: Arc<
+        tokio::sync::Mutex<
+            futures::stream::SplitSink<
+                tokio_tungstenite::WebSocketStream<S>,
+                tokio_tungstenite::tungstenite::protocol::Message,
+            >,
         >,
     >,
-    read: tokio::sync::Mutex<
-        futures::stream::SplitStream<tokio_tungstenite::WebSocketStream<S>>,
+    read: Arc<
+        tokio::sync::Mutex<
+            futures::stream::SplitStream<tokio_tungstenite::WebSocketStream<S>>,
+        >,
     >,
+}
+
+impl<S> Clone for WebSocket<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            write: self.write.clone(),
+            read: self.read.clone(),
+        }
+    }
 }
 
 impl<S> WebSocket<S>
@@ -98,13 +115,13 @@ where
         }
 
         let (write, read) = futures::stream::StreamExt::split(ws);
-        let write = tokio::sync::Mutex::new(write);
-        let read = tokio::sync::Mutex::new(read);
+        let write = Arc::new(tokio::sync::Mutex::new(write));
+        let read = Arc::new(tokio::sync::Mutex::new(read));
         Ok((Self { write, read }, PubKey(Arc::new(pk)), trusted_ip))
     }
 
     /// Receive from the websocket.
-    pub async fn recv(&self) -> Result<Payload<'_>> {
+    pub async fn recv(&self) -> Result<Payload> {
         let mut read = self.read.lock().await;
         use futures::stream::StreamExt;
         loop {
@@ -126,14 +143,12 @@ where
     }
 
     /// Send to the websocket.
-    pub async fn send(&self, payload: Payload<'_>) -> Result<()> {
+    pub async fn send(&self, payload: Payload) -> Result<()> {
         use futures::sink::SinkExt;
         use tokio_tungstenite::tungstenite::protocol::Message;
 
         let mut write = self.write.lock().await;
         let v = match payload {
-            Payload::Slice(s) => s.to_vec(),
-            Payload::SliceMut(s) => s.to_vec(),
             Payload::Vec(v) => v,
             Payload::BytesMut(b) => b.to_vec(),
         };
@@ -147,5 +162,42 @@ where
         use futures::sink::SinkExt;
 
         let _ = self.write.lock().await.close().await;
+    }
+}
+
+impl<S> SbdWebsocket for WebSocket<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    fn recv(&self) -> BoxFuture<'static, Result<Payload>> {
+        let this = (*self).clone();
+        Box::pin(async move { this.recv().await })
+    }
+
+    fn send(&self, payload: Payload) -> BoxFuture<'static, Result<()>> {
+        let this = (*self).clone();
+        Box::pin(async move { this.send(payload).await })
+    }
+
+    fn close(&self) -> BoxFuture<'static, ()> {
+        let this = (*self).clone();
+        Box::pin(async move { this.close().await })
+    }
+}
+
+impl<S> SbdWebsocket for Arc<S>
+where
+    S: SbdWebsocket,
+{
+    fn recv(&self) -> BoxFuture<'static, Result<Payload>> {
+        (**self).recv()
+    }
+
+    fn send(&self, payload: Payload) -> BoxFuture<'static, Result<()>> {
+        (**self).send(payload)
+    }
+
+    fn close(&self) -> BoxFuture<'static, ()> {
+        (**self).close()
     }
 }

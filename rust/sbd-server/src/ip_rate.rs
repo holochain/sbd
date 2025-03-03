@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::task::JoinHandle;
 
 type Map = HashMap<Arc<std::net::Ipv6Addr>, u64>;
 
+/// Rate limit connections by IP address.
 pub struct IpRate {
     origin: tokio::time::Instant,
     map: Arc<Mutex<Map>>,
@@ -91,6 +93,21 @@ impl IpRate {
 
         is_ok
     }
+}
+
+/// Spawn a Tokio task to prune the IpRate map.
+pub fn spawn_prune_task(ip_rate: Arc<IpRate>) -> JoinHandle<()> {
+    let ip_rate = Arc::downgrade(&ip_rate);
+    tokio::task::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            if let Some(ip_rate) = ip_rate.upgrade() {
+                ip_rate.prune();
+            } else {
+                break;
+            }
+        }
+    })
 }
 
 #[cfg(test)]

@@ -5,31 +5,28 @@
 const MAX_MSG_BYTES: i32 = 20_000;
 
 use std::io::{Error, Result};
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 mod config;
 pub use config::*;
 
 mod maybe_tls;
-use maybe_tls::*;
+pub use maybe_tls::*;
 
 mod ip_deny;
 mod ip_rate;
+pub use ip_rate::*;
 
 mod cslot;
+pub use cslot::*;
 
 mod cmd;
 
 /// Websocket backend abstraction.
 pub mod ws {
     /// Payload.
-    pub enum Payload<'a> {
-        /// Immutable slice.
-        Slice(&'a [u8]),
-
-        /// Mutable slice.
-        SliceMut(&'a mut [u8]),
-
+    pub enum Payload {
         /// Vec.
         Vec(Vec<u8>),
 
@@ -37,33 +34,23 @@ pub mod ws {
         BytesMut(bytes::BytesMut),
     }
 
-    impl std::ops::Deref for Payload<'_> {
+    impl std::ops::Deref for Payload {
         type Target = [u8];
 
         #[inline(always)]
         fn deref(&self) -> &Self::Target {
             match self {
-                Payload::Slice(b) => b,
-                Payload::SliceMut(b) => b,
                 Payload::Vec(v) => v.as_slice(),
                 Payload::BytesMut(b) => b.as_ref(),
             }
         }
     }
 
-    impl Payload<'_> {
+    impl Payload {
         /// Mutable payload.
         #[inline(always)]
         pub fn to_mut(&mut self) -> &mut [u8] {
             match self {
-                Payload::Slice(borrowed) => {
-                    *self = Payload::Vec(borrowed.to_owned());
-                    match self {
-                        Payload::Vec(owned) => owned,
-                        _ => unreachable!(),
-                    }
-                }
-                Payload::SliceMut(borrowed) => borrowed,
                 Payload::Vec(ref mut owned) => owned,
                 Payload::BytesMut(b) => b.as_mut(),
             }
@@ -72,6 +59,8 @@ pub mod ws {
 
     #[cfg(feature = "tungstenite")]
     mod ws_tungstenite;
+
+    use futures::future::BoxFuture;
     #[cfg(feature = "tungstenite")]
     pub use ws_tungstenite::*;
 
@@ -79,9 +68,24 @@ pub mod ws {
     mod ws_fastwebsockets;
     #[cfg(all(not(feature = "tungstenite"), feature = "fastwebsockets"))]
     pub use ws_fastwebsockets::*;
+
+    /// Websocket trait.
+    pub trait SbdWebsocket: Send + Sync + 'static {
+        /// Receive from the websocket.
+        fn recv(&self) -> BoxFuture<'static, std::io::Result<Payload>>;
+
+        /// Send to the websocket.
+        fn send(
+            &self,
+            payload: Payload,
+        ) -> BoxFuture<'static, std::io::Result<()>>;
+
+        /// Close the websocket.
+        fn close(&self) -> BoxFuture<'static, ()>;
+    }
 }
 
-use ws::*;
+pub use ws::{Payload, SbdWebsocket};
 
 /// Public key.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -115,40 +119,95 @@ impl Drop for SbdServer {
     }
 }
 
-async fn check_accept_connection(
-    _connect_permit: tokio::sync::OwnedSemaphorePermit,
-    config: Arc<Config>,
-    tls_config: Option<Arc<maybe_tls::TlsConfig>>,
-    ip_rate: Arc<ip_rate::IpRate>,
-    tcp: tokio::net::TcpStream,
-    addr: std::net::SocketAddr,
-    weak_cslot: cslot::WeakCSlot,
-) {
-    let raw_ip = Arc::new(match addr.ip() {
-        std::net::IpAddr::V4(ip) => ip.to_ipv6_mapped(),
-        std::net::IpAddr::V6(ip) => ip,
-    });
+/// Convert an IP address to an IPv6 address.
+pub fn to_canonical_ip(ip: IpAddr) -> Arc<Ipv6Addr> {
+    Arc::new(match ip {
+        IpAddr::V4(ip) => ip.to_ipv6_mapped(),
+        IpAddr::V6(ip) => ip,
+    })
+}
 
-    let mut calc_ip = raw_ip.clone();
+/// If the check passes, the canonical IP is returned, otherwise None and the connection should be
+/// dropped.
+pub async fn preflight_ip_check(
+    config: &Config,
+    ip_rate: &IpRate,
+    addr: std::net::SocketAddr,
+) -> Option<Arc<Ipv6Addr>> {
+    let raw_ip = to_canonical_ip(addr.ip());
 
     let use_trusted_ip = config.trusted_ip_header.is_some();
 
-    let _ = tokio::time::timeout(config.idle_dur(), async {
-        if !use_trusted_ip {
-            // Do this check BEFORE handshake to avoid extra
-            // server process when capable.
-            // If we *are* behind a reverse proxy, we assume
-            // some amount of DDoS mitigation is happening there
-            // and thus we can accept a little more process overhead
-            if ip_rate.is_blocked(&raw_ip).await {
-                return;
-            }
-
-            // Also precheck our rate limit, using up one byte
-            if !ip_rate.is_ok(&raw_ip, 1).await {
-                return;
-            }
+    if !use_trusted_ip {
+        // Do this check BEFORE handshake to avoid extra
+        // server process when capable.
+        // If we *are* behind a reverse proxy, we assume
+        // some amount of DDoS mitigation is happening there
+        // and thus we can accept a little more process overhead
+        if ip_rate.is_blocked(&raw_ip).await {
+            return None;
         }
+
+        // Also precheck our rate limit, using up one byte
+        if !ip_rate.is_ok(&raw_ip, 1).await {
+            return None;
+        }
+    }
+
+    Some(raw_ip)
+}
+
+/// Handle an upgraded websocket connection.
+pub async fn handle_upgraded(
+    config: Arc<Config>,
+    ip_rate: Arc<IpRate>,
+    weak_cslot: WeakCSlot,
+    ws: Arc<impl SbdWebsocket>,
+    pub_key: PubKey,
+    calc_ip: Arc<Ipv6Addr>,
+) {
+    let use_trusted_ip = config.trusted_ip_header.is_some();
+
+    // illegal pub key
+    if &pub_key.0[..28] == cmd::CMD_PREFIX {
+        return;
+    }
+
+    let ws = Arc::new(ws);
+
+    if use_trusted_ip {
+        // if using a trusted ip, check block here.
+        // see note above before the handshakes.
+        if ip_rate.is_blocked(&calc_ip).await {
+            return;
+        }
+
+        // Also precheck our rate limit, using up one byte
+        if !ip_rate.is_ok(&calc_ip, 1).await {
+            return;
+        }
+    }
+
+    if let Some(cslot) = weak_cslot.upgrade() {
+        cslot.insert(&config, calc_ip, pub_key, ws).await;
+    }
+}
+
+async fn check_accept_connection(
+    _connect_permit: tokio::sync::OwnedSemaphorePermit,
+    config: Arc<Config>,
+    tls_config: Option<Arc<TlsConfig>>,
+    ip_rate: Arc<IpRate>,
+    tcp: tokio::net::TcpStream,
+    addr: std::net::SocketAddr,
+    weak_cslot: WeakCSlot,
+) {
+    let _ = tokio::time::timeout(config.idle_dur(), async {
+        let Some(mut calc_ip) =
+            preflight_ip_check(&config, &ip_rate, addr).await
+        else {
+            return;
+        };
 
         let socket = if let Some(tls_config) = &tls_config {
             match MaybeTlsStream::tls(tls_config, tcp).await {
@@ -165,33 +224,19 @@ async fn check_accept_connection(
                 Err(_) => return,
             };
 
-        // illegal pub key
-        if &pub_key.0[..28] == cmd::CMD_PREFIX {
-            return;
-        }
-
-        let ws = Arc::new(ws);
-
         if let Some(ip) = ip {
             calc_ip = Arc::new(ip);
         }
 
-        if use_trusted_ip {
-            // if using a trusted ip, check block here.
-            // see note above before the handshakes.
-            if ip_rate.is_blocked(&calc_ip).await {
-                return;
-            }
-
-            // Also precheck our rate limit, using up one byte
-            if !ip_rate.is_ok(&calc_ip, 1).await {
-                return;
-            }
-        }
-
-        if let Some(cslot) = weak_cslot.upgrade() {
-            cslot.insert(&config, calc_ip, pub_key, ws).await;
-        }
+        handle_upgraded(
+            config,
+            ip_rate,
+            weak_cslot,
+            Arc::new(ws),
+            pub_key,
+            calc_ip,
+        )
+        .await;
     })
     .await;
 }
@@ -222,27 +267,14 @@ impl SbdServer {
         let mut task_list = Vec::new();
         let mut bind_addrs = Vec::new();
 
-        let ip_rate = Arc::new(ip_rate::IpRate::new(config.clone()));
+        let ip_rate = Arc::new(IpRate::new(config.clone()));
+        task_list.push(spawn_prune_task(ip_rate.clone()));
 
-        {
-            let ip_rate = Arc::downgrade(&ip_rate);
-            task_list.push(tokio::task::spawn(async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    if let Some(ip_rate) = ip_rate.upgrade() {
-                        ip_rate.prune();
-                    } else {
-                        break;
-                    }
-                }
-            }));
-        }
-
-        let cslot = cslot::CSlot::new(config.clone(), ip_rate.clone());
+        let cslot = CSlot::new(config.clone(), ip_rate.clone());
 
         // limit the number of connections that can be "connecting" at a time.
         // MAYBE make this configurable.
-        // read this as a prioritization of existing connections over incoming
+        // Read this as a prioritization of existing connections over incoming
         let connect_limit = Arc::new(tokio::sync::Semaphore::new(1024));
 
         let mut bind_port_zero = Vec::new();

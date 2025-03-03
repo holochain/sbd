@@ -6,6 +6,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+/// RustTLS config plus cert and pk paths.
 pub struct TlsConfig {
     cert: std::path::PathBuf,
     pk: std::path::PathBuf,
@@ -13,6 +14,7 @@ pub struct TlsConfig {
 }
 
 impl TlsConfig {
+    /// Load a new TlsConfig from a cert and pk path.
     pub async fn new(
         cert: &std::path::Path,
         pk: &std::path::Path,
@@ -27,10 +29,12 @@ impl TlsConfig {
         })
     }
 
+    /// Get the current rustls::server::ServerConfig.
     pub fn config(&self) -> Arc<rustls::server::ServerConfig> {
         self.config.lock().unwrap().clone()
     }
 
+    /// Reload the cert and pk.
     #[allow(dead_code)] // watch reload tls
     pub async fn reload(&self) -> std::io::Result<()> {
         let new_config = Self::load(&self.cert, &self.pk).await?;
@@ -76,6 +80,7 @@ pub enum MaybeTlsStream {
 }
 
 impl MaybeTlsStream {
+    /// Wrap a TcpStream in a MaybeTlsStream, configuring TLS
     pub async fn tls(
         tls_config: &TlsConfig,
         tcp: tokio::net::TcpStream,
