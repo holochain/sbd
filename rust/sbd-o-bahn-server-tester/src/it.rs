@@ -125,7 +125,7 @@ pub async fn exec_all(server: &mut crate::Server) -> Report {
     helper.into_report()
 }
 
-async fn exec_one<'h, T: It>(helper: &mut TestHelper<'h>) {
+async fn exec_one<T: It>(helper: &mut TestHelper<'_>) {
     println!("-- RUNNING TEST {} ({}) --", T::NAME, T::DESC);
 
     helper.start().await;
