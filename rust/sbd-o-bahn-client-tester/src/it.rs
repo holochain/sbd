@@ -94,7 +94,7 @@ pub async fn exec_all(client: &mut Client) -> Report {
     helper.into_report()
 }
 
-async fn exec_one<'h, T: It>(helper: &mut TestHelper<'h>) {
+async fn exec_one<T: It>(helper: &mut TestHelper<'_>) {
     helper.err_list.clear();
     match T::exec(helper).await {
         Ok(_) => {
