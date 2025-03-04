@@ -206,6 +206,7 @@ impl CSlot {
                 };
 
                 for (uniq, index, weak_ws) in rate_send_list {
+                    println!("index {index} in rate send list uniq {uniq}");
                     if let Some(ws) = weak_ws.upgrade() {
                         if ws
                             .send(cmd::SbdCmd::limit_byte_nanos(rate))
@@ -380,6 +381,7 @@ async fn ws_task(
         Ok(())
     })
     .await;
+    println!("authing compl with res {auth_res:?}");
 
     if auth_res.is_err() {
         return;
@@ -398,9 +400,12 @@ async fn ws_task(
         };
 
         match cmd {
-            cmd::SbdCmd::Keepalive => (),
-            cmd::SbdCmd::AuthRes(_) => break,
-            cmd::SbdCmd::Unknown => (),
+            cmd::SbdCmd::Keepalive => println!("keepalive cmd"),
+            cmd::SbdCmd::AuthRes(auth) => {
+                println!("auth res {auth:?}");
+                break;
+            }
+            cmd::SbdCmd::Unknown => println!("unknown cmd"),
             cmd::SbdCmd::Message(mut payload) => {
                 let dest = {
                     let payload = payload.to_mut();
@@ -413,10 +418,13 @@ async fn ws_task(
 
                     dest
                 };
+                println!("message to {dest:?}, getting cslot");
 
                 if let Some(cslot) = weak_cslot.upgrade() {
+                    println!("forwarding on message");
                     let _ = cslot.send(&dest, payload).await;
                 } else {
+                    println!("couldn't get strong cslot, not forwarding");
                     break;
                 }
             }

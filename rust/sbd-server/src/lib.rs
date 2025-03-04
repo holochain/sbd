@@ -84,7 +84,7 @@ pub mod ws {
 use ws::*;
 
 /// Public key.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PubKey(pub Arc<[u8; 32]>);
 
 impl PubKey {
