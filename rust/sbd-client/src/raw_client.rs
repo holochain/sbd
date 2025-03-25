@@ -241,8 +241,7 @@ fn priv_system_tls(
         any(target_os = "windows", target_os = "linux", target_os = "macos",),
     ))]
     roots.add_parsable_certificates(
-        rustls_native_certs::load_native_certs()
-            .expect("failed to load system tls certs"),
+        rustls_native_certs::load_native_certs().certs,
     );
 
     if danger_disable_certificate_check {
