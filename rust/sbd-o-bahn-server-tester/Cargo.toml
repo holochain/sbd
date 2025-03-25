@@ -1,6 +1,6 @@
 [package]
 name = "sbd-o-bahn-server-tester"
-version = "0.0.10-alpha3"
+version = "0.0.11-alpha2"
 description = "simple websocket-based message relay server tester"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/holochain/sbd"
