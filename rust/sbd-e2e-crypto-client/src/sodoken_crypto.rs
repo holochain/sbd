@@ -2,7 +2,7 @@ use crate::*;
 
 /// Secret stream encryptor.
 pub struct Encryptor {
-    sk: sodoken::LockedArray<32>,
+    sk: sodoken::SizedLockedArray<32>,
     state: sodoken::secretstream::State,
 }
 
@@ -33,10 +33,10 @@ impl Encryptor {
 
         sodoken::secretstream::push(
             &mut self.state,
+            &mut out[33..],
             msg,
             None,
             sodoken::secretstream::Tag::Message,
-            &mut out[33..],
         )?;
 
         // unwrap okay since we are constructing this
@@ -62,9 +62,9 @@ impl Decryptor {
 /// Crypto based on sodoken(libsodium).
 pub struct SodokenCrypto {
     sign_pk: [u8; 32],
-    sign_sk: Mutex<sodoken::LockedArray<64>>,
+    sign_sk: Mutex<sodoken::SizedLockedArray<64>>,
     enc_pk: [u8; 32],
-    enc_sk: Mutex<sodoken::LockedArray<32>>,
+    enc_sk: Mutex<sodoken::SizedLockedArray<32>>,
 }
 
 impl SodokenCrypto {
@@ -72,7 +72,7 @@ impl SodokenCrypto {
     pub fn new() -> Result<Self> {
         loop {
             let mut sign_pk = [0; 32];
-            let mut sign_sk = sodoken::LockedArray::new()?;
+            let mut sign_sk = sodoken::SizedLockedArray::new()?;
 
             sodoken::sign::keypair(&mut sign_pk, &mut sign_sk.lock())?;
 
@@ -83,7 +83,7 @@ impl SodokenCrypto {
             let mut enc_pk = [0; 32];
             sodoken::sign::pk_to_curve25519(&mut enc_pk, &sign_pk)?;
 
-            let mut enc_sk = sodoken::LockedArray::new()?;
+            let mut enc_sk = sodoken::SizedLockedArray::new()?;
             sodoken::sign::sk_to_curve25519(
                 &mut enc_sk.lock(),
                 &sign_sk.lock(),
@@ -101,12 +101,13 @@ impl SodokenCrypto {
     fn session(
         &self,
         peer_sign_pk: &[u8; 32],
-    ) -> Result<(sodoken::LockedArray<32>, sodoken::LockedArray<32>)> {
+    ) -> Result<(sodoken::SizedLockedArray<32>, sodoken::SizedLockedArray<32>)>
+    {
         let mut peer_enc_pk = [0; 32];
         sodoken::sign::pk_to_curve25519(&mut peer_enc_pk, peer_sign_pk)?;
 
-        let mut rx = sodoken::LockedArray::new()?;
-        let mut tx = sodoken::LockedArray::new()?;
+        let mut rx = sodoken::SizedLockedArray::new()?;
+        let mut tx = sodoken::SizedLockedArray::new()?;
 
         if peer_enc_pk > self.enc_pk {
             sodoken::kx::client_session_keys(

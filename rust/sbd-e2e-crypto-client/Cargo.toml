@@ -7,7 +7,7 @@ documentation = "https://docs.rs/sbd-e2e-crypto-client"
 authors = ["Holochain Core Dev Team <devcore@holochain.org>"]
 keywords = ["holochain", "holo", "p2p", "networking"]
 categories = ["network-programming"]
-version = "0.0.11-alpha2"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]

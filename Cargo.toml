@@ -14,12 +14,12 @@ panic = "abort"
 
 [workspace.dependencies]
 # workspace member deps
-sbd-bench = { version = "0.0.11-alpha2", path = "rust/sbd-bench" }
-sbd-client = { version = "0.0.11-alpha2", path = "rust/sbd-client" }
-sbd-e2e-crypto-client = { version = "0.0.11-alpha2", path = "rust/sbd-e2e-crypto-client" }
-sbd-o-bahn-client-tester = { version = "0.0.11-alpha2", path = "rust/sbd-o-bahn-client-tester" }
-sbd-o-bahn-server-tester = { version = "0.0.11-alpha2", path = "rust/sbd-o-bahn-server-tester" }
-sbd-server = { version = "0.0.11-alpha2", path = "rust/sbd-server" }
+sbd-bench = { version = "0.1.0", path = "rust/sbd-bench" }
+sbd-client = { version = "0.1.0", path = "rust/sbd-client" }
+sbd-e2e-crypto-client = { version = "0.1.0", path = "rust/sbd-e2e-crypto-client" }
+sbd-o-bahn-client-tester = { version = "0.1.0", path = "rust/sbd-o-bahn-client-tester" }
+sbd-o-bahn-server-tester = { version = "0.1.0", path = "rust/sbd-o-bahn-server-tester" }
+sbd-server = { version = "0.1.0", path = "rust/sbd-server" }
 # crate deps
 anstyle = "1.0.6"
 base64 = "0.22.0"
@@ -40,7 +40,7 @@ rustls = "0.23"
 rustls-native-certs = "0.8.1"
 rustls-pemfile = "2.1.2"
 slab = "0.4.9"
-sodoken = { version = "0.0.901-alpha", default-features = false }
+sodoken = { version = "0.1.0", default-features = false }
 tempfile = "3.10.1"
 tokio = { version = "1.37.0", default-features = false }
 tokio-rustls = "0.26"

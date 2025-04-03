@@ -1,6 +1,6 @@
 [package]
 name = "sbd-bench"
-version = "0.0.11-alpha2"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
