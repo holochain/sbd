@@ -1,6 +1,6 @@
 [package]
 name = "sbd-server"
-version = "0.1.0"
+version.workspace = true
 description = "simple websocket-based message relay server"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/holochain/sbd"
@@ -8,7 +8,7 @@ documentation = "https://docs.rs/sbd-server"
 authors = ["Holochain Core Dev Team <devcore@holochain.org>"]
 keywords = ["holochain", "holo", "p2p", "networking"]
 categories = ["network-programming"]
-edition = "2021"
+edition.workspace = true
 
 [dependencies]
 anstyle = { workspace = true }
