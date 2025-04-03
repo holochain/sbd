@@ -51,7 +51,7 @@ bump:
 		echo "USAGE: make bump ver=0.0.2-alpha"; \
 		exit 1; \
 	fi
-	sed -i 's/^\(sbd[^=]*= { \|\)version = "[^"]*"/\1version = "$(ver)"/g' $$(find . -name Cargo.toml)
+	sed -i 's/^\(sbd[^=]*= { version = "\|version = "\)[^"]*"/\1$(ver)"/g' ./Cargo.toml
 
 test:
 	cargo build --all-targets
