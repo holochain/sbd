@@ -39,7 +39,7 @@ publish:
 			exit 1; \
 			;; \
 	esac; \
-	export VER="v$$(grep version $${MANIFEST} | head -1 | cut -d ' ' -f 3 | cut -d \" -f 2)"; \
+	export VER="v$$(grep version ./Cargo.toml | head -1 | cut -d ' ' -f 3 | cut -d \" -f 2)"; \
 	echo "publish $(crate) $${MANIFEST} $${VER}"; \
 	git diff --exit-code; \
 	cargo publish --manifest-path $${MANIFEST}; \
