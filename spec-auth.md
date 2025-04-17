@@ -4,7 +4,7 @@ This is an augmentation to the SBD Spec (spec.md), providing an authentication h
 
 ## Addition of REST API to SBD Web Server
 
-The SBD webserver will be augmented to include the following http REST endpoint in addition to the websocket service currently provided.
+The SBD webserver will be augmented to include the following HTTP REST endpoint in addition to the websocket service currently provided.
 
 - `PUT /authenticate`
   - Required Request Header: `Content-Type: application/octet-stream`
