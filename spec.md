@@ -1,7 +1,7 @@
 # SBD Spec
 
 This SBD spec defines the protocol for SBD servers and clients to communicate.
-SBD is a simple websocket-based message relay protocol. 
+SBD is a simple websocket-based message relay protocol.
 
 ## 1. Websocket Stack
 
