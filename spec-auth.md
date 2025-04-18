@@ -26,13 +26,13 @@ Authorization: Bearer <authToken base64url string>
 
 ## Server Configuration and Authentication Hook
 
-The SBD server configuration will allow specifying a dns or ip endpoint (the "Hook Server") at which a copy of the above specified REST endpoint is running.
+The SBD server configuration will allow specifying a DNS or IP endpoint (the "Hook Server") at which a copy of the above specified REST endpoint is running.
 
-If specified, the SBD server will relay the auth request to the hook server, record the returned authToken to allow communication, and then return it.
+If specified, the SBD server will relay the auth request to the hook server, record the returned authToken so it is treated as valid authorization token for future requests, and then return it.
 
 If NOT specified, the SBD server will generate a random authToken, considering all client connections authenticated.
 
-The SBD server will time out tokens using the same logic and configured time periods for considering clients idle.
+The SBD server will expire previously authorized tokens using the same logic and configured time periods for considering clients idle.
 
 The hook server is free to return the same token to multiple clients. In that case, the token will remain valid if *any* of the clients are not idle.
 
