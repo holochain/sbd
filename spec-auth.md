@@ -12,7 +12,7 @@ The SBD webserver will be augmented to include the following HTTP REST endpoint 
   - If Response Status 200:
     - Response Header: `Content-Type: application/json`
     - Response Body: `{ authToken: "<base64url-string>" }`
-  - Status 401 indicates authentication bytes not accepted
+  - Status 401 indicates authentication bytes not accepted.
 
 ## Addition of HTTP "Authorization" Header
 
