@@ -1,6 +1,21 @@
 //! Sbd server library.
 #![deny(missing_docs)]
 
+/// Re-export axum, since we are exporting the axum::Router for use in
+/// other projects like kitsune2_boostrap_srv, we need to use the same
+/// version for them to be compatible.
+pub mod dependencies {
+    pub use ::axum;
+}
+
+/// This creation of an [axum::Router] is the main entry point to this code.
+/// You can also manually work with the other public types if needed,
+/// but this is easy mode.
+pub fn construct_axum_router(config: Arc<Config>) -> axum::Router {
+    drop(config);
+    todo!()
+}
+
 /// defined by the sbd spec
 const MAX_MSG_BYTES: i32 = 20_000;
 
@@ -63,11 +78,6 @@ pub mod ws {
     use futures::future::BoxFuture;
     #[cfg(feature = "tungstenite")]
     pub use ws_tungstenite::*;
-
-    #[cfg(all(not(feature = "tungstenite"), feature = "fastwebsockets"))]
-    mod ws_fastwebsockets;
-    #[cfg(all(not(feature = "tungstenite"), feature = "fastwebsockets"))]
-    pub use ws_fastwebsockets::*;
 
     /// Websocket trait.
     pub trait SbdWebsocket: Send + Sync + 'static {

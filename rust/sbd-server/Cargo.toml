@@ -12,6 +12,8 @@ edition.workspace = true
 
 [dependencies]
 anstyle = { workspace = true }
+axum = { workspace = true }
+axum-server = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = [ "color", "derive", "wrap_help" ] }
@@ -27,12 +29,6 @@ tokio-rustls = { workspace = true }
 futures = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, default-features = false, features = [ "handshake" ], optional = true }
 
-# feature fastwebsockets
-fastwebsockets = { workspace = true, features = [ "upgrade" ], optional = true }
-http-body-util = { workspace = true, optional = true }
-hyper-util = { workspace = true, features = [ "tokio" ], optional = true }
-hyper = { workspace = true, features = ["http1", "server"], optional = true }
-
 [dev-dependencies]
 escargot = { workspace = true, features = [ "print" ] }
 rcgen = { workspace = true }
@@ -47,11 +43,7 @@ default = [ "tungstenite" ]
 
 tungstenite = [ "dep:futures", "dep:tokio-tungstenite" ]
 
-fastwebsockets = [
-  "dep:fastwebsockets",
-  "dep:http-body-util",
-  "dep:hyper-util",
-  "dep:hyper",
-]
+# deprecated feature
+fastwebsockets = []
 
 unstable = []
