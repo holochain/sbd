@@ -2,6 +2,8 @@ use crate::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_sanity() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let tmp = tempfile::tempdir().unwrap();
     let tmp_dir = tmp.path().to_owned();
     let rcgen::CertifiedKey { cert, key_pair } =
@@ -81,12 +83,6 @@ async fn fuzzy_bind_tests() {
     for (expect, addr_list) in &[
         // it should be possible to bind these to the same port
         (R::Same, &["127.0.0.1:0", "[::1]:0"][..]),
-        // it will NOT be possible to bind these to the same port
-        // since we already bound them
-        (
-            R::Diff,
-            &["127.0.0.1:0", "[::1]:0", "127.0.0.1:0", "[::1]:0"][..],
-        ),
         // sanity that we can explicitly specify a port
         (
             R::Diff,

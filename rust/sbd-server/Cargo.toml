@@ -12,8 +12,13 @@ edition.workspace = true
 
 [dependencies]
 anstyle = { workspace = true }
-axum = { workspace = true }
-axum-server = { workspace = true }
+axum = { workspace = true, default-features = false, features = [
+  "http1",
+  "json",
+  "tokio",
+  "ws",
+] }
+axum-server = { workspace = true, features = [ "tls-rustls" ] }
 base64 = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = [ "color", "derive", "wrap_help" ] }
@@ -21,9 +26,11 @@ ed25519-dalek = { workspace = true, default-features = false }
 rand = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
+serde_json = { workspace = true }
 slab = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
 tokio-rustls = { workspace = true }
+ureq = { workspace = true }
 
 # feature tungstenite
 futures = { workspace = true, optional = true }

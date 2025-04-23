@@ -119,6 +119,11 @@ pub struct Config {
     /// this time expires to keep the connection alive.
     #[arg(long, default_value_t = DEF_LIMIT_IDLE_MILLIS)]
     pub limit_idle_millis: i32,
+
+    /// The authentication "Hook Server" as defined by
+    /// <https://github.com/holochain/sbd/blob/main/spec-auth.md>
+    #[arg(long)]
+    pub authentication_hook_server: Option<String>,
 }
 
 impl Default for Config {
@@ -148,6 +153,7 @@ impl Default for Config {
             limit_ip_kbps: DEF_LIMIT_IP_KBPS,
             limit_ip_byte_burst: DEF_LIMIT_IP_BYTE_BURST,
             limit_idle_millis: DEF_LIMIT_IDLE_MILLIS,
+            authentication_hook_server: None,
         }
     }
 }
