@@ -60,14 +60,6 @@ pub mod ws {
 
     use futures::future::BoxFuture;
 
-    /*
-    #[cfg(feature = "tungstenite")]
-    mod ws_tungstenite;
-
-    #[cfg(feature = "tungstenite")]
-    pub use ws_tungstenite::*;
-    */
-
     /// Websocket trait.
     pub trait SbdWebsocket: Send + Sync + 'static {
         /// Receive from the websocket.
@@ -81,9 +73,6 @@ pub mod ws {
 
         /// Close the websocket.
         fn close(&self) -> BoxFuture<'static, ()>;
-    }
-
-    impl SbdWebsocket for std::sync::Arc<impl SbdWebsocket> {
     }
 }
 
@@ -174,8 +163,6 @@ pub async fn handle_upgraded(
     if &pub_key.0[..28] == cmd::CMD_PREFIX {
         return;
     }
-
-    let ws = Arc::new(ws);
 
     if use_trusted_ip {
         // if using a trusted ip, check block here.
