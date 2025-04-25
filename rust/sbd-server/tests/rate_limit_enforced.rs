@@ -19,6 +19,7 @@ async fn get_client(
             allow_plain_text: true,
             danger_disable_certificate_check: false,
             headers: Vec::new(),
+            auth_material: None,
         })
         .connect()
         .await

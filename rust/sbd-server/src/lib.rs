@@ -156,7 +156,7 @@ pub async fn handle_upgraded(
     ws: Arc<impl SbdWebsocket>,
     pub_key: PubKey,
     calc_ip: Arc<Ipv6Addr>,
-    maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
+    maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
 ) {
     let use_trusted_ip = config.trusted_ip_header.is_some();
 
@@ -343,31 +343,21 @@ async fn handle_ws(
     use axum::response::IntoResponse;
     use base64::Engine;
 
-    let mut maybe_auth = None;
+    let token: Option<Arc<str>> = headers
+        .get("Authenticate")
+        .map(|t| t.to_str().ok().map(|t| <Arc<str>>::from(t)))
+        .flatten();
 
-    if let Some(token) = headers.get("Authenticate") {
-        let mut authorized = false;
+    let maybe_auth = Some((token.clone(), app_state.token_tracker.clone()));
 
-        if let Ok(token) = token.to_str() {
-            if token.starts_with("Bearer ") {
-                let token = token.trim_start_matches("Bearer ");
-                if app_state
-                    .token_tracker
-                    .check_is_token_valid(&app_state.config, token.into())
-                {
-                    maybe_auth =
-                        Some((token.into(), app_state.token_tracker.clone()));
-                    authorized = true;
-                }
-            }
-        }
-
-        if !authorized {
-            return axum::response::IntoResponse::into_response((
-                axum::http::StatusCode::UNAUTHORIZED,
-                "Unauthorized",
-            ));
-        }
+    if !app_state
+        .token_tracker
+        .check_is_token_valid(&app_state.config, token)
+    {
+        return axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Unauthorized",
+        ));
     }
 
     let pk = match base64::prelude::BASE64_URL_SAFE_NO_PAD.decode(pub_key) {
@@ -424,11 +414,31 @@ impl AuthTokenTracker {
 
     /// Check that a token is valid.
     /// If so, mark it as recently used so it doesn't time out.
+    /// The "token" parameter should be direct from the http header
+    /// i.e. with the "Barer" include, like "Bearer base64".
+    /// This should be called with None as the token if no Authenticate
+    /// header was specified.
     pub fn check_is_token_valid(
         &self,
         config: &Config,
-        token: Arc<str>,
+        token: Option<Arc<str>>,
     ) -> bool {
+        let token: Arc<str> = if let Some(token) = token {
+            // If the client supplied a token, always validate it,
+            // even if no hook server was specified in the config.
+            if !token.starts_with("Bearer ") {
+                return false;
+            }
+            token.trim_start_matches("Bearer ").into()
+        } else if config.authentication_hook_server.is_none() {
+            // If the client did not supply a token, and we have no
+            // hook server configured, allow the request.
+            return true;
+        } else {
+            // We have no token, but one is required. Unauthorized.
+            return false;
+        };
+
         let mut lock = self.token_map.lock().unwrap();
 
         let idle_dur = config.idle_dur();

@@ -18,7 +18,7 @@ enum TaskMsg {
         ws: Arc<dyn SbdWebsocket>,
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
-        maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
+        maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
     },
     Close,
 }
@@ -125,7 +125,7 @@ impl CSlot {
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
         ws: Arc<dyn SbdWebsocket>,
-        maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
+        maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
     ) -> std::result::Result<
         Vec<(u64, usize, Weak<dyn SbdWebsocket>)>,
         Arc<dyn SbdWebsocket>,
@@ -198,7 +198,7 @@ impl CSlot {
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
         ws: Arc<impl SbdWebsocket>,
-        maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
+        maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
     ) {
         let rate_send_list =
             self.insert_and_get_rate_send_list(ip, pk, ws, maybe_auth);
@@ -346,7 +346,7 @@ async fn ws_task(
     pk: PubKey,
     uniq: u64,
     index: usize,
-    maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
+    maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
 ) {
     let auth_res = tokio::time::timeout(config.idle_dur(), async {
         use rand::Rng;
