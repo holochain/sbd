@@ -270,6 +270,7 @@ impl SbdClient {
                 .danger_disable_certificate_check,
             headers: config.headers,
             auth_material: config.auth_material,
+            alter_token_cb: None,
         }
         .connect()
         .await?;

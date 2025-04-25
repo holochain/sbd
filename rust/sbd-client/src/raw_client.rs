@@ -2,6 +2,10 @@
 
 use crate::*;
 
+/// Alter token callback function signature.
+pub type AlterTokenCb =
+    Arc<dyn Fn(Arc<str>) -> Arc<str> + 'static + Send + Sync>;
+
 /// Connection info for creating a raw websocket connection.
 pub struct WsRawConnect {
     /// The full url including the pubkey path parameter.
@@ -25,6 +29,11 @@ pub struct WsRawConnect {
     /// If you must pass authentication material to the sbd server,
     /// specify it here.
     pub auth_material: Option<Vec<u8>>,
+
+    /// This is mostly a test api, but since we need to use it outside
+    /// this crate, it is available for anyone using the "raw_client" feature.
+    /// Allows altering the token post-receive so we can send bad ones.
+    pub alter_token_cb: Option<AlterTokenCb>,
 }
 
 impl WsRawConnect {
@@ -37,6 +46,7 @@ impl WsRawConnect {
             danger_disable_certificate_check,
             headers,
             auth_material,
+            alter_token_cb,
         } = self;
 
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -66,7 +76,6 @@ impl WsRawConnect {
                 }
                 _ => (),
             }
-            println!("{auth_url}");
 
             let token = tokio::task::spawn_blocking(move || {
                 ureq::put(auth_url.as_str())
@@ -85,6 +94,12 @@ impl WsRawConnect {
             let token: Token =
                 serde_json::from_str(&token).map_err(std::io::Error::other)?;
             let token = token.auth_token;
+
+            let token = if let Some(cb) = alter_token_cb {
+                cb(token)
+            } else {
+                token
+            };
 
             use tokio_tungstenite::tungstenite::http::header::*;
             let v =

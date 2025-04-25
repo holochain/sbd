@@ -367,7 +367,7 @@ async fn ws_task(
                 // when they opened this connection.
                 // just using this for side-effect marking token use time
                 let _ =
-                    token_tracker.check_is_token_valid(&config, token.clone());
+                    token_tracker.check_is_token_valid(config, token.clone());
             }
 
             match cmd::SbdCmd::parse(auth_res)? {
@@ -418,7 +418,7 @@ async fn ws_task(
             // we already know they had a valid token
             // when they opened this connection.
             // just using this for side-effect marking token use time
-            let _ = token_tracker.check_is_token_valid(&config, token.clone());
+            let _ = token_tracker.check_is_token_valid(config, token.clone());
         }
 
         let cmd = match cmd::SbdCmd::parse(payload) {

@@ -345,8 +345,7 @@ async fn handle_ws(
 
     let token: Option<Arc<str>> = headers
         .get("Authenticate")
-        .map(|t| t.to_str().ok().map(|t| <Arc<str>>::from(t)))
-        .flatten();
+        .and_then(|t| t.to_str().ok().map(<Arc<str>>::from));
 
     let maybe_auth = Some((token.clone(), app_state.token_tracker.clone()));
 
@@ -445,8 +444,10 @@ impl AuthTokenTracker {
 
         lock.retain(|_t, e| e.elapsed() < idle_dur);
 
-        if lock.contains_key(&token) {
-            lock.insert(token, std::time::Instant::now());
+        if let std::collections::hash_map::Entry::Occupied(mut e) =
+            lock.entry(token)
+        {
+            e.insert(std::time::Instant::now());
             true
         } else {
             false
