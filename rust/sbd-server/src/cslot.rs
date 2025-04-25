@@ -18,6 +18,7 @@ enum TaskMsg {
         ws: Arc<dyn SbdWebsocket>,
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
+        maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
     },
     Close,
 }
@@ -124,6 +125,7 @@ impl CSlot {
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
         ws: Arc<dyn SbdWebsocket>,
+        maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
     ) -> std::result::Result<
         Vec<(u64, usize, Weak<dyn SbdWebsocket>)>,
         Arc<dyn SbdWebsocket>,
@@ -183,6 +185,7 @@ impl CSlot {
             ws,
             ip,
             pk,
+            maybe_auth,
         });
 
         Ok(rate_send_list)
@@ -195,8 +198,10 @@ impl CSlot {
         ip: Arc<std::net::Ipv6Addr>,
         pk: PubKey,
         ws: Arc<impl SbdWebsocket>,
+        maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
     ) {
-        let rate_send_list = self.insert_and_get_rate_send_list(ip, pk, ws);
+        let rate_send_list =
+            self.insert_and_get_rate_send_list(ip, pk, ws, maybe_auth);
 
         match rate_send_list {
             Ok(rate_send_list) => {
@@ -297,6 +302,7 @@ async fn top_task(
             ws,
             ip,
             pk,
+            maybe_auth,
         } = uitem
         {
             let next_i = tokio::select! {
@@ -310,6 +316,7 @@ async fn top_task(
                     pk,
                     uniq,
                     index,
+                    maybe_auth,
                 ) => None,
             };
 
@@ -339,6 +346,7 @@ async fn ws_task(
     pk: PubKey,
     uniq: u64,
     index: usize,
+    maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
 ) {
     let auth_res = tokio::time::timeout(config.idle_dur(), async {
         use rand::Rng;
@@ -352,6 +360,14 @@ async fn ws_task(
 
             if !ip_rate.is_ok(&ip, auth_res.as_ref().len()).await {
                 return Err(Error::other("ip rate limited"));
+            }
+
+            if let Some((token, token_tracker)) = &maybe_auth {
+                // we already know they had a valid token
+                // when they opened this connection.
+                // just using this for side-effect marking token use time
+                let _ =
+                    token_tracker.check_is_token_valid(&config, token.clone());
             }
 
             match cmd::SbdCmd::parse(auth_res)? {
@@ -396,6 +412,13 @@ async fn ws_task(
     {
         if !ip_rate.is_ok(&ip, payload.len()).await {
             break;
+        }
+
+        if let Some((token, token_tracker)) = &maybe_auth {
+            // we already know they had a valid token
+            // when they opened this connection.
+            // just using this for side-effect marking token use time
+            let _ = token_tracker.check_is_token_valid(&config, token.clone());
         }
 
         let cmd = match cmd::SbdCmd::parse(payload) {

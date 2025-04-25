@@ -156,6 +156,7 @@ pub async fn handle_upgraded(
     ws: Arc<impl SbdWebsocket>,
     pub_key: PubKey,
     calc_ip: Arc<Ipv6Addr>,
+    maybe_auth: Option<(Arc<str>, AuthTokenTracker)>,
 ) {
     let use_trusted_ip = config.trusted_ip_header.is_some();
 
@@ -178,7 +179,9 @@ pub async fn handle_upgraded(
     }
 
     if let Some(cslot) = weak_cslot.upgrade() {
-        cslot.insert(&config, calc_ip, pub_key, ws).await;
+        cslot
+            .insert(&config, calc_ip, pub_key, ws, maybe_auth)
+            .await;
     }
 }
 
@@ -340,6 +343,33 @@ async fn handle_ws(
     use axum::response::IntoResponse;
     use base64::Engine;
 
+    let mut maybe_auth = None;
+
+    if let Some(token) = headers.get("Authenticate") {
+        let mut authorized = false;
+
+        if let Ok(token) = token.to_str() {
+            if token.starts_with("Bearer ") {
+                let token = token.trim_start_matches("Bearer ");
+                if app_state
+                    .token_tracker
+                    .check_is_token_valid(&app_state.config, token.into())
+                {
+                    maybe_auth =
+                        Some((token.into(), app_state.token_tracker.clone()));
+                    authorized = true;
+                }
+            }
+        }
+
+        if !authorized {
+            return axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::UNAUTHORIZED,
+                "Unauthorized",
+            ));
+        }
+    }
+
     let pk = match base64::prelude::BASE64_URL_SAFE_NO_PAD.decode(pub_key) {
         Ok(pk) if pk.len() == 32 => {
             let mut sized_pk = [0; 32];
@@ -370,6 +400,7 @@ async fn handle_ws(
                 Arc::new(WebsocketImpl::new(socket)),
                 pk,
                 calc_ip,
+                maybe_auth,
             )
             .await;
         },
@@ -389,6 +420,27 @@ impl AuthTokenTracker {
             .lock()
             .unwrap()
             .insert(token, std::time::Instant::now());
+    }
+
+    /// Check that a token is valid.
+    /// If so, mark it as recently used so it doesn't time out.
+    pub fn check_is_token_valid(
+        &self,
+        config: &Config,
+        token: Arc<str>,
+    ) -> bool {
+        let mut lock = self.token_map.lock().unwrap();
+
+        let idle_dur = config.idle_dur();
+
+        lock.retain(|_t, e| e.elapsed() < idle_dur);
+
+        if lock.contains_key(&token) {
+            lock.insert(token, std::time::Instant::now());
+            true
+        } else {
+            false
+        }
     }
 }
 

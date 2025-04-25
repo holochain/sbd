@@ -4,17 +4,19 @@ use std::sync::Arc;
 
 async fn get_client(addrs: &[std::net::SocketAddr]) -> (SbdClient, MsgRecv) {
     for addr in addrs {
-        if let Ok(r) = SbdClient::connect_config(
+        match SbdClient::connect_config(
             &format!("ws://{addr}"),
             &DefaultCrypto::default(),
             SbdClientConfig {
                 allow_plain_text: true,
+                auth_material: Some(b"hello".to_vec()),
                 ..Default::default()
             },
         )
         .await
         {
-            return r;
+            Ok(r) => return r,
+            Err(err) => println!("connect error: {err:?}"),
         }
     }
     panic!()

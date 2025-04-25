@@ -23,6 +23,7 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = [ "color", "derive", "wrap_help" ] }
 ed25519-dalek = { workspace = true, default-features = false }
+futures = { workspace = true }
 rand = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
@@ -31,10 +32,6 @@ slab = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
 tokio-rustls = { workspace = true }
 ureq = { workspace = true }
-
-# feature tungstenite
-futures = { workspace = true, optional = true }
-tokio-tungstenite = { workspace = true, default-features = false, features = [ "handshake" ], optional = true }
 
 [dev-dependencies]
 escargot = { workspace = true, features = [ "print" ] }
@@ -46,9 +43,10 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = [ "test-util" ] }
 
 [features]
-default = [ "tungstenite" ]
+default = []
 
-tungstenite = [ "dep:futures", "dep:tokio-tungstenite" ]
+# deprecated feature
+tungstenite = []
 
 # deprecated feature
 fastwebsockets = []
