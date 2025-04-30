@@ -257,7 +257,7 @@ pub async fn process_authenticate_token(
                 // this is a HookServerError, not an OtherError,
                 // because it is the hook server that either failed
                 // to send a full response, or sent back non-utf8 bytes, etc...
-                .map_err(|err| HookServerError(err))
+                .map_err(HookServerError)
         })
         .await
         .map_err(|_| OtherError(std::io::Error::other("tokio task died")))??
@@ -569,13 +569,17 @@ impl SbdServer {
                     .handle(h.clone())
                     .serve(app.clone());
                 task_list.push(tokio::task::spawn(async move {
-                    let _ = server.await;
+                    if let Err(err) = server.await {
+                        tracing::error!(?err);
+                    }
                 }));
             } else {
                 let server =
                     axum_server::bind(a).handle(h.clone()).serve(app.clone());
                 task_list.push(tokio::task::spawn(async move {
-                    let _ = server.await;
+                    if let Err(err) = server.await {
+                        tracing::error!(?err);
+                    }
                 }));
             }
 
