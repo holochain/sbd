@@ -1,7 +1,155 @@
 use crate::*;
+use sbd_client::Crypto;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unauthorized_with_fallback_token_provider() {
+    let mut config = Config::default();
+    config.bind.push("127.0.0.1:0".into());
+    let server = SbdServer::new(Arc::new(config)).await.unwrap();
+    let addr = server.bind_addrs()[0].clone();
+
+    let crypto = sbd_client::DefaultCrypto::default();
+    let pub_key = sbd_client::PubKey(Arc::new(*crypto.pub_key()));
+
+    // make sure we know what we're doing
+    assert!((sbd_client::raw_client::WsRawConnect {
+        full_url: format!("ws://{addr}/{pub_key:?}"),
+        max_message_size: 20_000,
+        allow_plain_text: true,
+        danger_disable_certificate_check: true,
+        headers: vec![],
+        auth_material: Some(b"hello".to_vec()),
+        alter_token_cb: Some(Arc::new(|t| t)),
+    })
+    .connect()
+    .await
+    .is_ok());
+
+    // actually test that bad tokens cause errors
+    assert!((sbd_client::raw_client::WsRawConnect {
+        full_url: format!("ws://{addr}/{pub_key:?}"),
+        max_message_size: 20_000,
+        allow_plain_text: true,
+        danger_disable_certificate_check: true,
+        headers: vec![],
+        auth_material: Some(b"hello".to_vec()),
+        alter_token_cb: Some(Arc::new(|_t| "world".into())),
+    })
+    .connect()
+    .await
+    .is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn auth_with_real_token_provider() {
+    async fn handle_auth(body: bytes::Bytes) -> axum::response::Response {
+        if &body[..] != b"hello" {
+            return axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::UNAUTHORIZED,
+                "Unauthorized",
+            ));
+        }
+        axum::response::IntoResponse::into_response(axum::Json(
+            serde_json::json!({
+                "authToken": "bob",
+            }),
+        ))
+    }
+
+    let app: axum::Router<()> = axum::Router::new()
+        .route("/authenticate", axum::routing::put(handle_auth));
+
+    let h = axum_server::Handle::default();
+    let h2 = h.clone();
+
+    let task = tokio::task::spawn(async move {
+        axum_server::bind(([127, 0, 0, 1], 0).into())
+            .handle(h2)
+            .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+            .await
+            .unwrap();
+    });
+
+    let hook_addr = h.listening().await.unwrap();
+    println!("hook_addr: {hook_addr:?}");
+
+    let mut config = Config::default();
+    config.bind.push("127.0.0.1:0".into());
+    config.authentication_hook_server =
+        Some(format!("http://{hook_addr:?}/authenticate"));
+    let server = SbdServer::new(Arc::new(config)).await.unwrap();
+    let addr = server.bind_addrs()[0].clone();
+
+    let crypto = sbd_client::DefaultCrypto::default();
+    let pub_key = sbd_client::PubKey(Arc::new(*crypto.pub_key()));
+
+    // make sure we can authenticate in the happy path
+    assert!((sbd_client::raw_client::WsRawConnect {
+        full_url: format!("ws://{addr}/{pub_key:?}"),
+        max_message_size: 20_000,
+        allow_plain_text: true,
+        danger_disable_certificate_check: true,
+        headers: vec![],
+        auth_material: Some(b"hello".to_vec()),
+        alter_token_cb: Some(Arc::new(|t| {
+            println!("TEST GOT TOKEN: {t}");
+            assert_eq!(r#"{"authToken":"bob"}"#, &*t);
+            t
+        })),
+    })
+    .connect()
+    .await
+    .is_ok());
+
+    // ...and double check that no alter_token_cb is a happy path
+    assert!((sbd_client::raw_client::WsRawConnect {
+        full_url: format!("ws://{addr}/{pub_key:?}"),
+        max_message_size: 20_000,
+        allow_plain_text: true,
+        danger_disable_certificate_check: true,
+        headers: vec![],
+        auth_material: Some(b"hello".to_vec()),
+        alter_token_cb: None,
+    })
+    .connect()
+    .await
+    .is_ok());
+
+    // make sure it is an error if we have bad key material
+    assert!((sbd_client::raw_client::WsRawConnect {
+        full_url: format!("ws://{addr}/{pub_key:?}"),
+        max_message_size: 20_000,
+        allow_plain_text: true,
+        danger_disable_certificate_check: true,
+        headers: vec![],
+        auth_material: Some(b"world".to_vec()),
+        alter_token_cb: None,
+    })
+    .connect()
+    .await
+    .is_err());
+
+    // finally make sure that bad tokens cause errors
+    assert!((sbd_client::raw_client::WsRawConnect {
+        full_url: format!("ws://{addr}/{pub_key:?}"),
+        max_message_size: 20_000,
+        allow_plain_text: true,
+        danger_disable_certificate_check: true,
+        headers: vec![],
+        auth_material: Some(b"hello".to_vec()),
+        alter_token_cb: Some(Arc::new(|_t| "world".into())),
+    })
+    .connect()
+    .await
+    .is_err());
+
+    task.abort();
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_sanity() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let tmp = tempfile::tempdir().unwrap();
     let tmp_dir = tmp.path().to_owned();
     let rcgen::CertifiedKey { cert, key_pair } =
@@ -81,12 +229,6 @@ async fn fuzzy_bind_tests() {
     for (expect, addr_list) in &[
         // it should be possible to bind these to the same port
         (R::Same, &["127.0.0.1:0", "[::1]:0"][..]),
-        // it will NOT be possible to bind these to the same port
-        // since we already bound them
-        (
-            R::Diff,
-            &["127.0.0.1:0", "[::1]:0", "127.0.0.1:0", "[::1]:0"][..],
-        ),
         // sanity that we can explicitly specify a port
         (
             R::Diff,

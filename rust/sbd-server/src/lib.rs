@@ -4,9 +4,10 @@
 /// defined by the sbd spec
 const MAX_MSG_BYTES: i32 = 20_000;
 
+use std::collections::HashMap;
 use std::io::{Error, Result};
 use std::net::{IpAddr, Ipv6Addr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 mod config;
 pub use config::*;
@@ -57,17 +58,7 @@ pub mod ws {
         }
     }
 
-    #[cfg(feature = "tungstenite")]
-    mod ws_tungstenite;
-
     use futures::future::BoxFuture;
-    #[cfg(feature = "tungstenite")]
-    pub use ws_tungstenite::*;
-
-    #[cfg(all(not(feature = "tungstenite"), feature = "fastwebsockets"))]
-    mod ws_fastwebsockets;
-    #[cfg(all(not(feature = "tungstenite"), feature = "fastwebsockets"))]
-    pub use ws_fastwebsockets::*;
 
     /// Websocket trait.
     pub trait SbdWebsocket: Send + Sync + 'static {
@@ -165,6 +156,7 @@ pub async fn handle_upgraded(
     ws: Arc<impl SbdWebsocket>,
     pub_key: PubKey,
     calc_ip: Arc<Ipv6Addr>,
+    maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
 ) {
     let use_trusted_ip = config.trusted_ip_header.is_some();
 
@@ -172,8 +164,6 @@ pub async fn handle_upgraded(
     if &pub_key.0[..28] == cmd::CMD_PREFIX {
         return;
     }
-
-    let ws = Arc::new(ws);
 
     if use_trusted_ip {
         // if using a trusted ip, check block here.
@@ -189,68 +179,339 @@ pub async fn handle_upgraded(
     }
 
     if let Some(cslot) = weak_cslot.upgrade() {
-        cslot.insert(&config, calc_ip, pub_key, ws).await;
+        cslot
+            .insert(&config, calc_ip, pub_key, ws, maybe_auth)
+            .await;
     }
 }
 
-async fn check_accept_connection(
-    _connect_permit: tokio::sync::OwnedSemaphorePermit,
-    config: Arc<Config>,
-    tls_config: Option<Arc<TlsConfig>>,
-    ip_rate: Arc<IpRate>,
-    tcp: tokio::net::TcpStream,
-    addr: std::net::SocketAddr,
-    weak_cslot: WeakCSlot,
-) {
-    let _ = tokio::time::timeout(config.idle_dur(), async {
-        let Some(mut calc_ip) =
-            preflight_ip_check(&config, &ip_rate, addr).await
-        else {
-            return;
-        };
+async fn handle_auth(
+    axum::extract::State(app_state): axum::extract::State<AppState>,
+    body: bytes::Bytes,
+) -> axum::response::Response {
+    use AuthenticateTokenError::*;
 
-        let socket = if let Some(tls_config) = &tls_config {
-            match MaybeTlsStream::tls(tls_config, tcp).await {
-                Err(_) => return,
-                Ok(tls) => tls,
+    match process_authenticate_token(
+        &app_state.config,
+        &app_state.token_tracker,
+        body,
+    )
+    .await
+    {
+        Ok(token) => axum::response::IntoResponse::into_response(axum::Json(
+            serde_json::json!({
+                "authToken": *token,
+            }),
+        )),
+        Err(Unauthorized) => {
+            tracing::debug!("/authenticate: UNAUTHORIZED");
+            axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::UNAUTHORIZED,
+                "Unauthorized",
+            ))
+        }
+        Err(HookServerError(err)) => {
+            tracing::debug!(?err, "/authenticate: BAD_GATEWAY");
+            axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::BAD_GATEWAY,
+                format!("BAD_GATEWAY: {err:?}"),
+            ))
+        }
+        Err(OtherError(err)) => {
+            tracing::warn!(?err, "/authenticate: INTERNAL_SERVER_ERROR");
+            axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("INTERNAL_SERVER_ERROR: {err:?}"),
+            ))
+        }
+    }
+}
+
+/// Authenticate token error type.
+pub enum AuthenticateTokenError {
+    /// The token is invalid.
+    Unauthorized,
+    /// We had an error talking to the hook server.
+    HookServerError(std::io::Error),
+    /// We had an internal error.
+    OtherError(std::io::Error),
+}
+
+/// Handle receiving a PUT "/authenticate" rest api request.
+pub async fn process_authenticate_token(
+    config: &Config,
+    token_tracker: &AuthTokenTracker,
+    auth_material: bytes::Bytes,
+) -> std::result::Result<Arc<str>, AuthenticateTokenError> {
+    use AuthenticateTokenError::*;
+
+    let token: Arc<str> = if let Some(url) = &config.authentication_hook_server
+    {
+        let url = url.clone();
+        tokio::task::spawn_blocking(move || {
+            ureq::put(&url)
+                .set("Content-Type", "application/octet-stream")
+                .send(&auth_material[..])
+                .map_err(|err| HookServerError(std::io::Error::other(err)))?
+                .into_string()
+                // this is a HookServerError, not an OtherError,
+                // because it is the hook server that either failed
+                // to send a full response, or sent back non-utf8 bytes, etc...
+                .map_err(HookServerError)
+        })
+        .await
+        .map_err(|_| OtherError(std::io::Error::other("tokio task died")))??
+    } else {
+        // If no backend configured, fallback to gen random token:
+        use base64::prelude::*;
+        use rand::Rng;
+
+        let mut bytes = [0; 32];
+        rand::thread_rng().fill(&mut bytes);
+        BASE64_URL_SAFE_NO_PAD.encode(&bytes[..])
+    }
+    .into();
+
+    token_tracker.register_token(token.clone());
+
+    Ok(token)
+}
+
+#[derive(Clone)]
+struct WebsocketImpl {
+    write: Arc<
+        tokio::sync::Mutex<
+            futures::stream::SplitSink<
+                axum::extract::ws::WebSocket,
+                axum::extract::ws::Message,
+            >,
+        >,
+    >,
+    read: Arc<
+        tokio::sync::Mutex<
+            futures::stream::SplitStream<axum::extract::ws::WebSocket>,
+        >,
+    >,
+}
+
+impl SbdWebsocket for WebsocketImpl {
+    fn recv(&self) -> futures::future::BoxFuture<'static, Result<Payload>> {
+        let this = self.clone();
+        Box::pin(async move {
+            let mut read = this.read.lock().await;
+            use futures::stream::StreamExt;
+            loop {
+                match read.next().await {
+                    None => return Err(Error::other("closed")),
+                    Some(r) => {
+                        let msg = r.map_err(Error::other)?;
+                        match msg {
+                            axum::extract::ws::Message::Text(s) => {
+                                return Ok(Payload::Vec(s.as_bytes().to_vec()))
+                            }
+                            axum::extract::ws::Message::Binary(v) => {
+                                return Ok(Payload::Vec(v[..].to_vec()))
+                            }
+                            axum::extract::ws::Message::Ping(_)
+                            | axum::extract::ws::Message::Pong(_) => (),
+                            axum::extract::ws::Message::Close(_) => {
+                                return Err(Error::other("closed"))
+                            }
+                        }
+                    }
+                }
             }
-        } else {
-            MaybeTlsStream::Tcp(tcp)
-        };
+        })
+    }
 
-        let (ws, pub_key, ip) =
-            match ws::WebSocket::upgrade(config.clone(), socket).await {
-                Ok(r) => r,
-                Err(_) => return,
+    fn send(
+        &self,
+        payload: Payload,
+    ) -> futures::future::BoxFuture<'static, Result<()>> {
+        use futures::SinkExt;
+        let this = self.clone();
+        Box::pin(async move {
+            let mut write = this.write.lock().await;
+            let v = match payload {
+                Payload::Vec(v) => v,
+                Payload::BytesMut(b) => b.to_vec(),
             };
+            write
+                .send(axum::extract::ws::Message::Binary(
+                    bytes::Bytes::copy_from_slice(&v),
+                ))
+                .await
+                .map_err(Error::other)?;
+            write.flush().await.map_err(Error::other)?;
+            Ok(())
+        })
+    }
 
-        if let Some(ip) = ip {
-            calc_ip = Arc::new(ip);
-        }
-
-        handle_upgraded(
-            config,
-            ip_rate,
-            weak_cslot,
-            Arc::new(ws),
-            pub_key,
-            calc_ip,
-        )
-        .await;
-    })
-    .await;
+    fn close(&self) -> futures::future::BoxFuture<'static, ()> {
+        use futures::SinkExt;
+        let this = self.clone();
+        Box::pin(async move {
+            let _ = this.write.lock().await.close().await;
+        })
+    }
 }
 
-async fn bind_all<I: IntoIterator<Item = std::net::SocketAddr>>(
-    i: I,
-) -> Vec<tokio::net::TcpListener> {
-    let mut listeners = Vec::new();
-    for a in i.into_iter() {
-        if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
-            listeners.push(tcp);
+impl WebsocketImpl {
+    fn new(ws: axum::extract::ws::WebSocket) -> Self {
+        use futures::StreamExt;
+        let (tx, rx) = ws.split();
+        Self {
+            write: Arc::new(tokio::sync::Mutex::new(tx)),
+            read: Arc::new(tokio::sync::Mutex::new(rx)),
         }
     }
-    listeners
+}
+
+async fn handle_ws(
+    axum::extract::Path(pub_key): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    ws: axum::extract::WebSocketUpgrade,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<
+        std::net::SocketAddr,
+    >,
+    axum::extract::State(app_state): axum::extract::State<AppState>,
+) -> impl axum::response::IntoResponse {
+    use axum::response::IntoResponse;
+    use base64::Engine;
+
+    let token: Option<Arc<str>> = headers
+        .get("Authorization")
+        .and_then(|t| t.to_str().ok().map(<Arc<str>>::from));
+
+    let maybe_auth = Some((token.clone(), app_state.token_tracker.clone()));
+
+    if !app_state
+        .token_tracker
+        .check_is_token_valid(&app_state.config, token)
+    {
+        return axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Unauthorized",
+        ));
+    }
+
+    let pk = match base64::prelude::BASE64_URL_SAFE_NO_PAD.decode(pub_key) {
+        Ok(pk) if pk.len() == 32 => {
+            let mut sized_pk = [0; 32];
+            sized_pk.copy_from_slice(&pk);
+            PubKey(Arc::new(sized_pk))
+        }
+        _ => return axum::http::StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let mut calc_ip = to_canonical_ip(addr.ip());
+
+    if let Some(trusted_ip_header) = &app_state.config.trusted_ip_header {
+        if let Some(header) =
+            headers.get(trusted_ip_header).and_then(|h| h.to_str().ok())
+        {
+            if let Ok(ip) = header.parse::<IpAddr>() {
+                calc_ip = to_canonical_ip(ip);
+            }
+        }
+    }
+
+    ws.max_message_size(MAX_MSG_BYTES as usize).on_upgrade(
+        move |socket| async move {
+            handle_upgraded(
+                app_state.config.clone(),
+                app_state.ip_rate.clone(),
+                app_state.cslot.clone(),
+                Arc::new(WebsocketImpl::new(socket)),
+                pk,
+                calc_ip,
+                maybe_auth,
+            )
+            .await;
+        },
+    )
+}
+
+/// Utility for managing auth tokens.
+#[derive(Clone, Default)]
+pub struct AuthTokenTracker {
+    token_map: Arc<Mutex<HashMap<Arc<str>, std::time::Instant>>>,
+}
+
+impl AuthTokenTracker {
+    /// Register a token as valid.
+    pub fn register_token(&self, token: Arc<str>) {
+        self.token_map
+            .lock()
+            .unwrap()
+            .insert(token, std::time::Instant::now());
+    }
+
+    /// Check that a token is valid.
+    /// If so, mark it as recently used so it doesn't time out.
+    /// The "token" parameter should be direct from the http header
+    /// i.e. with the "Barer" include, like "Bearer base64".
+    /// This should be called with None as the token if no Authenticate
+    /// header was specified.
+    pub fn check_is_token_valid(
+        &self,
+        config: &Config,
+        token: Option<Arc<str>>,
+    ) -> bool {
+        let token: Arc<str> = if let Some(token) = token {
+            // If the client supplied a token, always validate it,
+            // even if no hook server was specified in the config.
+            if !token.starts_with("Bearer ") {
+                return false;
+            }
+            token.trim_start_matches("Bearer ").into()
+        } else if config.authentication_hook_server.is_none() {
+            // If the client did not supply a token, and we have no
+            // hook server configured, allow the request.
+            return true;
+        } else {
+            // We have no token, but one is required. Unauthorized.
+            return false;
+        };
+
+        let mut lock = self.token_map.lock().unwrap();
+
+        let idle_dur = config.idle_dur();
+
+        lock.retain(|_t, e| e.elapsed() < idle_dur);
+
+        if let std::collections::hash_map::Entry::Occupied(mut e) =
+            lock.entry(token)
+        {
+            e.insert(std::time::Instant::now());
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AppState {
+    config: Arc<Config>,
+    token_tracker: AuthTokenTracker,
+    ip_rate: Arc<IpRate>,
+    cslot: WeakCSlot,
+}
+
+impl AppState {
+    pub fn new(
+        config: Arc<Config>,
+        ip_rate: Arc<IpRate>,
+        cslot: WeakCSlot,
+    ) -> Self {
+        Self {
+            config,
+            token_tracker: AuthTokenTracker::default(),
+            ip_rate,
+            cslot,
+        }
+    }
 }
 
 impl SbdServer {
@@ -271,102 +532,63 @@ impl SbdServer {
         task_list.push(spawn_prune_task(ip_rate.clone()));
 
         let cslot = CSlot::new(config.clone(), ip_rate.clone());
+        let weak_cslot = cslot.weak();
 
-        // limit the number of connections that can be "connecting" at a time.
-        // MAYBE make this configurable.
-        // Read this as a prioritization of existing connections over incoming
-        let connect_limit = Arc::new(tokio::sync::Semaphore::new(1024));
+        let app: axum::Router<()> = axum::Router::new()
+            .route("/authenticate", axum::routing::put(handle_auth))
+            .route("/{pub_key}", axum::routing::any(handle_ws))
+            .layer(axum::extract::DefaultBodyLimit::max(1024))
+            .with_state(AppState::new(
+                config.clone(),
+                ip_rate.clone(),
+                weak_cslot.clone(),
+            ));
 
-        let mut bind_port_zero = Vec::new();
-        let mut bind_explicit_port = Vec::new();
+        let app =
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+
+        let mut found_port_zero: Option<u16> = None;
 
         for bind in config.bind.iter() {
-            let a: std::net::SocketAddr = bind.parse().map_err(Error::other)?;
-
-            if a.port() == 0 {
-                bind_port_zero.push(a);
-            } else {
-                bind_explicit_port.push(a);
+            let mut a: std::net::SocketAddr =
+                bind.parse().map_err(Error::other)?;
+            if let Some(found_port_zero) = &found_port_zero {
+                if a.port() == 0 {
+                    a.set_port(*found_port_zero);
+                }
             }
-        }
 
-        let (mut listeners, mut l2) = tokio::join!(
-            async {
-                // bail if there are no zero port bindings
-                if bind_port_zero.is_empty() {
-                    return Vec::new();
-                }
+            let h = axum_server::Handle::new();
 
-                // try twice to re-use port
-                'top: for _ in 0..2 {
-                    let mut listeners = Vec::new();
-
-                    let mut a_iter = bind_port_zero.iter();
-
-                    let a = a_iter.next().unwrap();
-                    if let Ok(tcp) = tokio::net::TcpListener::bind(a).await {
-                        let port = tcp.local_addr().unwrap().port();
-                        listeners.push(tcp);
-
-                        for a in a_iter {
-                            let mut a = *a;
-                            a.set_port(port);
-                            match tokio::net::TcpListener::bind(a).await {
-                                Err(_) => continue 'top,
-                                Ok(tcp) => listeners.push(tcp),
-                            }
-                        }
-
-                        return listeners;
+            if let Some(tls_config) = &tls_config {
+                let tls_config =
+                    axum_server::tls_rustls::RustlsConfig::from_config(
+                        tls_config.config(),
+                    );
+                let server = axum_server::bind_rustls(a, tls_config)
+                    .handle(h.clone())
+                    .serve(app.clone());
+                task_list.push(tokio::task::spawn(async move {
+                    if let Err(err) = server.await {
+                        tracing::error!(?err);
                     }
-                }
-
-                // just use whatever we can get
-                bind_all(bind_port_zero).await
-            },
-            async { bind_all(bind_explicit_port).await },
-        );
-
-        listeners.append(&mut l2);
-
-        if listeners.is_empty() {
-            return Err(Error::other("failed to bind any listeners"));
-        }
-
-        let weak_cslot = cslot.weak();
-        for tcp in listeners {
-            bind_addrs.push(tcp.local_addr()?);
-
-            let tls_config = tls_config.clone();
-            let connect_limit = connect_limit.clone();
-            let config = config.clone();
-            let weak_cslot = weak_cslot.clone();
-            let ip_rate = ip_rate.clone();
-            task_list.push(tokio::task::spawn(async move {
-                loop {
-                    if let Ok((tcp, addr)) = tcp.accept().await {
-                        // Drop connections as fast as possible
-                        // if we are overloaded on accepting connections.
-                        let connect_permit =
-                            match connect_limit.clone().try_acquire_owned() {
-                                Ok(permit) => permit,
-                                _ => continue,
-                            };
-
-                        // just let this task die on its own time
-                        // MAYBE preallocate these tasks like cslot
-                        tokio::task::spawn(check_accept_connection(
-                            connect_permit,
-                            config.clone(),
-                            tls_config.clone(),
-                            ip_rate.clone(),
-                            tcp,
-                            addr,
-                            weak_cslot.clone(),
-                        ));
+                }));
+            } else {
+                let server =
+                    axum_server::bind(a).handle(h.clone()).serve(app.clone());
+                task_list.push(tokio::task::spawn(async move {
+                    if let Err(err) = server.await {
+                        tracing::error!(?err);
                     }
+                }));
+            }
+
+            if let Some(addr) = h.listening().await {
+                if found_port_zero.is_none() && a.port() == 0 {
+                    found_port_zero = Some(addr.port());
                 }
-            }));
+                bind_addrs.push(addr);
+            }
         }
 
         Ok(Self {

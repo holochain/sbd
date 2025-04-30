@@ -205,6 +205,10 @@ pub struct SbdClientConfig {
 
     /// Set any custom http headers to send with the websocket connect.
     pub headers: Vec<(String, String)>,
+
+    /// If you must pass authentication material to the sbd server,
+    /// specify it here.
+    pub auth_material: Option<Vec<u8>>,
 }
 
 impl Default for SbdClientConfig {
@@ -214,6 +218,7 @@ impl Default for SbdClientConfig {
             allow_plain_text: false,
             danger_disable_certificate_check: false,
             headers: Vec::new(),
+            auth_material: None,
         }
     }
 }
@@ -264,6 +269,8 @@ impl SbdClient {
             danger_disable_certificate_check: config
                 .danger_disable_certificate_check,
             headers: config.headers,
+            auth_material: config.auth_material,
+            alter_token_cb: None,
         }
         .connect()
         .await?;

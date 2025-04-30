@@ -12,26 +12,27 @@ edition.workspace = true
 
 [dependencies]
 anstyle = { workspace = true }
+axum = { workspace = true, default-features = false, features = [
+  "http1",
+  "json",
+  "tokio",
+  "ws",
+] }
+axum-server = { workspace = true, features = [ "tls-rustls" ] }
 base64 = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = [ "color", "derive", "wrap_help" ] }
 ed25519-dalek = { workspace = true, default-features = false }
+futures = { workspace = true }
 rand = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
+serde_json = { workspace = true }
 slab = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
 tokio-rustls = { workspace = true }
-
-# feature tungstenite
-futures = { workspace = true, optional = true }
-tokio-tungstenite = { workspace = true, default-features = false, features = [ "handshake" ], optional = true }
-
-# feature fastwebsockets
-fastwebsockets = { workspace = true, features = [ "upgrade" ], optional = true }
-http-body-util = { workspace = true, optional = true }
-hyper-util = { workspace = true, features = [ "tokio" ], optional = true }
-hyper = { workspace = true, features = ["http1", "server"], optional = true }
+tracing = { workspace = true }
+ureq = { workspace = true }
 
 [dev-dependencies]
 escargot = { workspace = true, features = [ "print" ] }
@@ -43,15 +44,12 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = [ "test-util" ] }
 
 [features]
-default = [ "tungstenite" ]
+default = []
 
-tungstenite = [ "dep:futures", "dep:tokio-tungstenite" ]
+# deprecated feature
+tungstenite = []
 
-fastwebsockets = [
-  "dep:fastwebsockets",
-  "dep:http-body-util",
-  "dep:hyper-util",
-  "dep:hyper",
-]
+# deprecated feature
+fastwebsockets = []
 
 unstable = []

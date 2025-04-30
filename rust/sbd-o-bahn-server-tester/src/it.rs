@@ -81,6 +81,8 @@ impl<'h> TestHelper<'h> {
                 allow_plain_text: true,
                 danger_disable_certificate_check: false,
                 headers: headers.clone(),
+                auth_material: None,
+                alter_token_cb: None,
             })
             .connect()
             .await

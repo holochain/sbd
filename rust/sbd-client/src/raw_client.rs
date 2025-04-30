@@ -2,6 +2,10 @@
 
 use crate::*;
 
+/// Alter token callback function signature.
+pub type AlterTokenCb =
+    Arc<dyn Fn(Arc<str>) -> Arc<str> + 'static + Send + Sync>;
+
 /// Connection info for creating a raw websocket connection.
 pub struct WsRawConnect {
     /// The full url including the pubkey path parameter.
@@ -21,6 +25,15 @@ pub struct WsRawConnect {
 
     /// Set any custom http headers to send with the websocket connect.
     pub headers: Vec<(String, String)>,
+
+    /// If you must pass authentication material to the sbd server,
+    /// specify it here.
+    pub auth_material: Option<Vec<u8>>,
+
+    /// This is mostly a test api, but since we need to use it outside
+    /// this crate, it is available for anyone using the "raw_client" feature.
+    /// Allows altering the token post-receive so we can send bad ones.
+    pub alter_token_cb: Option<AlterTokenCb>,
 }
 
 impl WsRawConnect {
@@ -32,11 +45,14 @@ impl WsRawConnect {
             allow_plain_text,
             danger_disable_certificate_check,
             headers,
+            auth_material,
+            alter_token_cb,
         } = self;
 
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = IntoClientRequest::into_client_request(full_url)
-            .map_err(Error::other)?;
+        let mut request =
+            IntoClientRequest::into_client_request(full_url.clone())
+                .map_err(Error::other)?;
 
         for (k, v) in headers {
             use tokio_tungstenite::tungstenite::http::header::*;
@@ -46,6 +62,51 @@ impl WsRawConnect {
                 HeaderValue::from_bytes(v.as_bytes()).map_err(Error::other)?;
             request.headers_mut().insert(k, v);
         }
+
+        if let Some(auth_material) = auth_material {
+            let mut auth_url =
+                url::Url::parse(&full_url).map_err(std::io::Error::other)?;
+            auth_url.set_path("/authenticate");
+            match auth_url.scheme() {
+                "ws" => {
+                    let _ = auth_url.set_scheme("http");
+                }
+                "wss" => {
+                    let _ = auth_url.set_scheme("https");
+                }
+                _ => (),
+            }
+
+            let token = tokio::task::spawn_blocking(move || {
+                ureq::put(auth_url.as_str())
+                    .send(&auth_material[..])
+                    .map_err(std::io::Error::other)?
+                    .into_string()
+            })
+            .await??;
+
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Token {
+                auth_token: Arc<str>,
+            }
+
+            let token: Token =
+                serde_json::from_str(&token).map_err(std::io::Error::other)?;
+            let token = token.auth_token;
+
+            let token = if let Some(cb) = alter_token_cb {
+                cb(token)
+            } else {
+                token
+            };
+
+            use tokio_tungstenite::tungstenite::http::header::*;
+            let v =
+                HeaderValue::from_bytes(format!("Bearer {token}").as_bytes())
+                    .map_err(Error::other)?;
+            request.headers_mut().insert("Authorization", v);
+        };
 
         let scheme_ws = request.uri().scheme_str() == Some("ws");
         let scheme_wss = request.uri().scheme_str() == Some("wss");

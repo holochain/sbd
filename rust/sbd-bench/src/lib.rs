@@ -19,6 +19,8 @@ async fn raw_connect(
             allow_plain_text: true,
             danger_disable_certificate_check: false,
             headers: Vec::new(),
+            auth_material: None,
+            alter_token_cb: None,
         })
         .connect()
         .await
