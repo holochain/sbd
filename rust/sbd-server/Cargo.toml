@@ -31,6 +31,7 @@ serde_json = { workspace = true }
 slab = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
 tokio-rustls = { workspace = true }
+tracing = { workspace = true }
 ureq = { workspace = true }
 
 [dev-dependencies]

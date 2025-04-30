@@ -203,20 +203,27 @@ async fn handle_auth(
                 "authToken": *token,
             }),
         )),
-        Err(Unauthorized) => axum::response::IntoResponse::into_response((
-            axum::http::StatusCode::UNAUTHORIZED,
-            "Unauthorized",
-        )),
+        Err(Unauthorized) => {
+            tracing::debug!("/authenticate: UNAUTHORIZED");
+            axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::UNAUTHORIZED,
+                "Unauthorized",
+            ))
+        }
         Err(HookServerError(err)) => {
+            tracing::debug!(?err, "/authenticate: BAD_GATEWAY");
             axum::response::IntoResponse::into_response((
                 axum::http::StatusCode::BAD_GATEWAY,
                 format!("BAD_GATEWAY: {err:?}"),
             ))
         }
-        Err(OtherError(err)) => axum::response::IntoResponse::into_response((
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("INTERNAL_SERVER_ERROR: {err:?}"),
-        )),
+        Err(OtherError(err)) => {
+            tracing::warn!(?err, "/authenticate: INTERNAL_SERVER_ERROR");
+            axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("INTERNAL_SERVER_ERROR: {err:?}"),
+            ))
+        }
     }
 }
 
@@ -247,7 +254,10 @@ pub async fn process_authenticate_token(
                 .send(&auth_material[..])
                 .map_err(|err| HookServerError(std::io::Error::other(err)))?
                 .into_string()
-                .map_err(|err| OtherError(err))
+                // this is a HookServerError, not an OtherError,
+                // because it is the hook server that either failed
+                // to send a full response, or sent back non-utf8 bytes, etc...
+                .map_err(|err| HookServerError(err))
         })
         .await
         .map_err(|_| OtherError(std::io::Error::other("tokio task died")))??

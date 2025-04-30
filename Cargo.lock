@@ -1970,6 +1970,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tracing",
  "ureq",
 ]
 
