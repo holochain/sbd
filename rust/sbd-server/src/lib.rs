@@ -189,6 +189,8 @@ async fn handle_auth(
     axum::extract::State(app_state): axum::extract::State<AppState>,
     body: bytes::Bytes,
 ) -> axum::response::Response {
+    use AuthenticateTokenError::*;
+
     match process_authenticate_token(
         &app_state.config,
         &app_state.token_tracker,
@@ -201,11 +203,31 @@ async fn handle_auth(
                 "authToken": *token,
             }),
         )),
-        Err(_) => axum::response::IntoResponse::into_response((
+        Err(Unauthorized) => axum::response::IntoResponse::into_response((
             axum::http::StatusCode::UNAUTHORIZED,
             "Unauthorized",
         )),
+        Err(HookServerError(err)) => {
+            axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::BAD_GATEWAY,
+                format!("BAD_GATEWAY: {err:?}"),
+            ))
+        }
+        Err(OtherError(err)) => axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("INTERNAL_SERVER_ERROR: {err:?}"),
+        )),
     }
+}
+
+/// Authenticate token error type.
+pub enum AuthenticateTokenError {
+    /// The token is invalid.
+    Unauthorized,
+    /// We had an error talking to the hook server.
+    HookServerError(std::io::Error),
+    /// We had an internal error.
+    OtherError(std::io::Error),
 }
 
 /// Handle receiving a PUT "/authenticate" rest api request.
@@ -213,7 +235,9 @@ pub async fn process_authenticate_token(
     config: &Config,
     token_tracker: &AuthTokenTracker,
     auth_material: bytes::Bytes,
-) -> Result<Arc<str>> {
+) -> std::result::Result<Arc<str>, AuthenticateTokenError> {
+    use AuthenticateTokenError::*;
+
     let token: Arc<str> = if let Some(url) = &config.authentication_hook_server
     {
         let url = url.clone();
@@ -221,10 +245,12 @@ pub async fn process_authenticate_token(
             ureq::put(&url)
                 .set("Content-Type", "application/octet-stream")
                 .send(&auth_material[..])
-                .map_err(std::io::Error::other)?
+                .map_err(|err| HookServerError(std::io::Error::other(err)))?
                 .into_string()
+                .map_err(|err| OtherError(err))
         })
-        .await??
+        .await
+        .map_err(|_| OtherError(std::io::Error::other("tokio task died")))??
     } else {
         // If no backend configured, fallback to gen random token:
         use base64::prelude::*;
@@ -344,7 +370,7 @@ async fn handle_ws(
     use base64::Engine;
 
     let token: Option<Arc<str>> = headers
-        .get("Authenticate")
+        .get("Authorization")
         .and_then(|t| t.to_str().ok().map(<Arc<str>>::from));
 
     let maybe_auth = Some((token.clone(), app_state.token_tracker.clone()));

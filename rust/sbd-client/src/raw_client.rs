@@ -105,7 +105,7 @@ impl WsRawConnect {
             let v =
                 HeaderValue::from_bytes(format!("Bearer {token}").as_bytes())
                     .map_err(Error::other)?;
-            request.headers_mut().insert("Authenticate", v);
+            request.headers_mut().insert("Authorization", v);
         };
 
         let scheme_ws = request.uri().scheme_str() == Some("ws");
