@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::{Error, Result};
 use std::sync::{Arc, Mutex, Weak};
 
-pub use sbd_client::{SbdClientConfig, PubKey};
+pub use sbd_client::{PubKey, SbdClientConfig};
 
 pub mod protocol;
 
@@ -98,9 +98,12 @@ impl SbdClientCrypto {
         let crypto = sodoken_crypto::SodokenCrypto::new()?;
         use sbd_client::Crypto;
         let pub_key = PubKey(Arc::new(*crypto.pub_key()));
-        let (client, recv) =
-            sbd_client::SbdClient::connect_config(url, &crypto, config.client_config.clone())
-                .await?;
+        let (client, recv) = sbd_client::SbdClient::connect_config(
+            url,
+            &crypto,
+            config.client_config.clone(),
+        )
+        .await?;
 
         let client = Arc::new(tokio::sync::Mutex::new(client));
         let inner = Arc::new(Mutex::new(Inner::new(config, crypto)));
