@@ -6,8 +6,11 @@ pub struct Cfg(pub Config);
 impl Cfg {
     pub fn d() -> Self {
         Self(Config {
+            client_config: sbd_client::SbdClientConfig {
+                allow_plain_text: true,
+                ..Default::default()
+            },
             listener: true,
-            allow_plain_text: true,
             max_connections: 100,
             max_idle: tokio::time::Duration::from_secs(10),
         })

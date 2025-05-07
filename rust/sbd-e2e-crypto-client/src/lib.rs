@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::{Error, Result};
 use std::sync::{Arc, Mutex, Weak};
 
-pub use sbd_client::PubKey;
+pub use sbd_client::{PubKey, SbdClientConfig};
 
 pub mod protocol;
 
@@ -16,13 +16,13 @@ pub use sodoken_crypto::*;
 
 /// Configuration for setting up an SbdClientCrypto connection.
 pub struct Config {
+    /// Config required for the sbd client itself.
+    pub client_config: sbd_client::SbdClientConfig,
+
     /// If `true` we will accept incoming "connections", otherwise
     /// messages from nodes we didn't explicitly "connect" to will
     /// be ignored.
     pub listener: bool,
-
-    /// If `true` we will allow connecting to insecure plaintext servers.
-    pub allow_plain_text: bool,
 
     /// Max connection count.
     pub max_connections: usize,
@@ -34,8 +34,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            client_config: Default::default(),
             listener: false,
-            allow_plain_text: false,
             max_connections: 4096,
             max_idle: std::time::Duration::from_secs(10),
         }
@@ -95,16 +95,15 @@ impl SbdClientCrypto {
         url: &str,
         config: Arc<Config>,
     ) -> Result<(Self, MsgRecv)> {
-        let client_config = sbd_client::SbdClientConfig {
-            allow_plain_text: config.allow_plain_text,
-            ..Default::default()
-        };
         let crypto = sodoken_crypto::SodokenCrypto::new()?;
         use sbd_client::Crypto;
         let pub_key = PubKey(Arc::new(*crypto.pub_key()));
-        let (client, recv) =
-            sbd_client::SbdClient::connect_config(url, &crypto, client_config)
-                .await?;
+        let (client, recv) = sbd_client::SbdClient::connect_config(
+            url,
+            &crypto,
+            config.client_config.clone(),
+        )
+        .await?;
 
         let client = Arc::new(tokio::sync::Mutex::new(client));
         let inner = Arc::new(Mutex::new(Inner::new(config, crypto)));
