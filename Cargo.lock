@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-bench"
-version = "0.0.9-alpha"
+version = "0.0.12-alpha"
 dependencies = [
  "base64 0.22.1",
  "criterion",
@@ -1438,7 +1438,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-client"
-version = "0.0.9-alpha"
+version = "0.0.12-alpha"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-e2e-crypto-client"
-version = "0.0.9-alpha"
+version = "0.0.12-alpha"
 dependencies = [
  "sbd-client",
  "sbd-server",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-o-bahn-client-tester"
-version = "0.0.9-alpha"
+version = "0.0.12-alpha"
 dependencies = [
  "hex",
  "sbd-server",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-o-bahn-server-tester"
-version = "0.0.9-alpha"
+version = "0.0.12-alpha"
 dependencies = [
  "sbd-client",
  "tokio",
@@ -1486,7 +1486,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-server"
-version = "0.0.9-alpha"
+version = "0.0.12-alpha"
 dependencies = [
  "anstyle",
  "base64 0.22.1",
