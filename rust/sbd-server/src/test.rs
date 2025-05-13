@@ -93,7 +93,7 @@ async fn auth_with_real_token_provider() {
         auth_material: Some(b"hello".to_vec()),
         alter_token_cb: Some(Arc::new(|t| {
             println!("TEST GOT TOKEN: {t}");
-            assert_eq!(r#"{"authToken":"bob"}"#, &*t);
+            assert_eq!("bob", &*t);
             t
         })),
     })

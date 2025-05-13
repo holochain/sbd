@@ -248,19 +248,33 @@ pub async fn process_authenticate_token(
     let token: Arc<str> = if let Some(url) = &config.authentication_hook_server
     {
         let url = url.clone();
-        tokio::task::spawn_blocking(move || {
+        let token = tokio::task::spawn_blocking(move || {
             ureq::put(&url)
                 .set("Content-Type", "application/octet-stream")
                 .send(&auth_material[..])
-                .map_err(|err| HookServerError(std::io::Error::other(err)))?
+                .map_err(|err| match err {
+                    ureq::Error::Status(401, _) => Unauthorized,
+                    oth => HookServerError(std::io::Error::other(oth)),
+                })?
                 .into_string()
-                // this is a HookServerError, not an OtherError,
-                // because it is the hook server that either failed
-                // to send a full response, or sent back non-utf8 bytes, etc...
+                // this is a HookServerError, not an OtherError, because
+                // it is the hook server that either failed to send a full
+                // response, or sent back non-utf8 bytes, etc...
                 .map_err(HookServerError)
         })
         .await
-        .map_err(|_| OtherError(std::io::Error::other("tokio task died")))??
+        .map_err(|_| OtherError(std::io::Error::other("tokio task died")))??;
+
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Token {
+            auth_token: String,
+        }
+
+        let token: Token = serde_json::from_str(&token)
+            .map_err(|err| OtherError(std::io::Error::other(err)))?;
+
+        token.auth_token
     } else {
         // If no backend configured, fallback to gen random token:
         use base64::prelude::*;

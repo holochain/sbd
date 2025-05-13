@@ -27,6 +27,7 @@ futures = { workspace = true }
 rand = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
+serde = { workspace = true, features = [ "derive" ] }
 serde_json = { workspace = true }
 slab = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
