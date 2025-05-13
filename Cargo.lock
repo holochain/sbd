@@ -1965,6 +1965,7 @@ dependencies = [
  "rustls",
  "rustls-pemfile",
  "sbd-client",
+ "serde",
  "serde_json",
  "slab",
  "tempfile",
