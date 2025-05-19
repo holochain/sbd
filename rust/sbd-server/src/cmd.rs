@@ -44,6 +44,7 @@ pub enum SbdCmd {
 }
 
 impl SbdCmd {
+    /// Parse payload bytes into a command.
     pub fn parse(payload: Payload) -> Result<Self> {
         if payload.as_ref().len() < HDR_SIZE {
             return Err(Error::other("invalid payload length"));
@@ -70,6 +71,7 @@ impl SbdCmd {
 }
 
 impl SbdCmd {
+    /// Construct a rate limiting message.
     pub fn limit_byte_nanos(limit_byte_nanos: i32) -> Payload {
         let mut out = Vec::with_capacity(HDR_SIZE + 4);
         let n = limit_byte_nanos.to_be_bytes();
@@ -79,6 +81,7 @@ impl SbdCmd {
         Payload::Vec(out)
     }
 
+    /// Construct an idle timeout message.
     pub fn limit_idle_millis(limit_idle_millis: i32) -> Payload {
         let mut out = Vec::with_capacity(HDR_SIZE + 4);
         let n = limit_idle_millis.to_be_bytes();
@@ -88,6 +91,7 @@ impl SbdCmd {
         Payload::Vec(out)
     }
 
+    /// Construct an auth request message.
     pub fn auth_req(nonce: &[u8; 32]) -> Payload {
         let mut out = Vec::with_capacity(HDR_SIZE + NONCE_SIZE);
         out.extend_from_slice(CMD_PREFIX);
@@ -96,6 +100,7 @@ impl SbdCmd {
         Payload::Vec(out)
     }
 
+    /// Construct a ready message.
     pub fn ready() -> Payload {
         Payload::Vec(vec![
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

@@ -62,6 +62,9 @@ impl WeakCSlot {
 }
 
 /// A connection slot container.
+///
+/// Note this is not clone to ensure that when the single top-level handle
+/// is dropped, that everything is shutdown properly.
 pub struct CSlot(Arc<Mutex<CSlotInner>>);
 
 impl CSlot {
@@ -97,6 +100,7 @@ impl CSlot {
         WeakCSlot(Arc::downgrade(&self.0))
     }
 
+    /// Remove a websocket from its slot.
     fn remove(&self, uniq: u64, index: usize) {
         let mut lock = self.0.lock().unwrap();
 
@@ -118,6 +122,7 @@ impl CSlot {
         });
     }
 
+    /// Inner helper for inserting a websocket into an available slot.
     // oi clippy, this is super straight forward...
     #[allow(clippy::type_complexity)]
     fn insert_and_get_rate_send_list(
@@ -235,6 +240,7 @@ impl CSlot {
         }
     }
 
+    /// Mark a slotted websocket as ready.
     fn mark_ready(&self, uniq: u64, index: usize) {
         let mut lock = self.0.lock().unwrap();
         if let Some(slab) = lock.slab.get_mut(index) {
@@ -244,6 +250,7 @@ impl CSlot {
         }
     }
 
+    /// Get a websocket from its slot.
     fn get_sender(
         &self,
         pk: &PubKey,
@@ -270,6 +277,7 @@ impl CSlot {
         Ok((uniq, index, ws))
     }
 
+    /// Send via a slotted websocket.
     async fn send(&self, pk: &PubKey, payload: Payload) -> Result<()> {
         let (uniq, index, ws) = self.get_sender(pk)?;
 
@@ -283,6 +291,8 @@ impl CSlot {
     }
 }
 
+/// This top-task waits for incoming websockets, process them until
+/// completion, and then waits for a new incoming websocket.
 async fn top_task(
     config: Arc<Config>,
     ip_rate: Arc<ip_rate::IpRate>,
@@ -305,6 +315,7 @@ async fn top_task(
             maybe_auth,
         } = uitem
         {
+            // we have a websocket! process to completion
             let next_i = tokio::select! {
                 i = recv.recv() => Some(i),
                 _ = ws_task(
@@ -320,6 +331,7 @@ async fn top_task(
                 ) => None,
             };
 
+            // our websocket task ended, clean up
             ws.close().await;
             drop(ws);
             if let Some(cslot) = weak.upgrade() {
@@ -336,6 +348,7 @@ async fn top_task(
     }
 }
 
+/// Process a single websocket until completion.
 #[allow(clippy::too_many_arguments)]
 async fn ws_task(
     config: &Arc<Config>,
@@ -353,6 +366,7 @@ async fn ws_task(
         let mut nonce = [0xdb; 32];
         rand::thread_rng().fill(&mut nonce[..]);
 
+        // send them a nonce to prove they can sign with private key
         ws.send(cmd::SbdCmd::auth_req(&nonce)).await?;
 
         loop {
@@ -407,6 +421,8 @@ async fn ws_task(
         return;
     }
 
+    // auth/init complete, now loop over incoming data
+
     while let Ok(Ok(payload)) =
         tokio::time::timeout(config.idle_dur(), ws.recv()).await
     {
@@ -427,9 +443,13 @@ async fn ws_task(
         };
 
         match cmd {
+            // don't need to do anything... we just get a new timeout above
             cmd::SbdCmd::Keepalive => (),
+            // auth responses are invalid at this stage
             cmd::SbdCmd::AuthRes(_) => break,
+            // ignore unknown messages
             cmd::SbdCmd::Unknown => (),
+            // forward an actual message to a peer
             cmd::SbdCmd::Message(mut payload) => {
                 let dest = {
                     let payload = payload.to_mut();
