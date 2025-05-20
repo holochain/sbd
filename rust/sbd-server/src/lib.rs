@@ -99,6 +99,9 @@ impl PubKey {
 pub struct SbdServer {
     task_list: Vec<tokio::task::JoinHandle<()>>,
     bind_addrs: Vec<std::net::SocketAddr>,
+
+    // this should be the only non-weak cslot so the others are dropped
+    // if this top-level server instance is ever dropped.
     _cslot: cslot::CSlot,
 }
 
@@ -185,12 +188,14 @@ pub async fn handle_upgraded(
     }
 }
 
+/// Handle the /authenticate request for access token
 async fn handle_auth(
     axum::extract::State(app_state): axum::extract::State<AppState>,
     body: bytes::Bytes,
 ) -> axum::response::Response {
     use AuthenticateTokenError::*;
 
+    // process the actual authentication
     match process_authenticate_token(
         &app_state.config,
         &app_state.token_tracker,
@@ -247,6 +252,8 @@ pub async fn process_authenticate_token(
 
     let token: Arc<str> = if let Some(url) = &config.authentication_hook_server
     {
+        // if a hook server is configured, forward the call to it
+
         let url = url.clone();
         let token = tokio::task::spawn_blocking(move || {
             ureq::put(&url)
@@ -276,7 +283,8 @@ pub async fn process_authenticate_token(
 
         token.auth_token
     } else {
-        // If no backend configured, fallback to gen random token:
+        // If no hook server is configured, fallback to gen random token
+
         use base64::prelude::*;
         use rand::Rng;
 
@@ -286,11 +294,13 @@ pub async fn process_authenticate_token(
     }
     .into();
 
+    // register the token with our authentication token tracker
     token_tracker.register_token(token.clone());
 
     Ok(token)
 }
 
+/// Implement the ability to use axum websockets as our websocket backend.
 #[derive(Clone)]
 struct WebsocketImpl {
     write: Arc<
@@ -381,6 +391,7 @@ impl WebsocketImpl {
     }
 }
 
+/// Handle the http upgrade request for a websocket connection.
 async fn handle_ws(
     axum::extract::Path(pub_key): axum::extract::Path<String>,
     headers: axum::http::HeaderMap,
@@ -393,12 +404,14 @@ async fn handle_ws(
     use axum::response::IntoResponse;
     use base64::Engine;
 
+    // first check for auth tokens
     let token: Option<Arc<str>> = headers
         .get("Authorization")
         .and_then(|t| t.to_str().ok().map(<Arc<str>>::from));
 
     let maybe_auth = Some((token.clone(), app_state.token_tracker.clone()));
 
+    // compare any passed tokens with our token authentication mechanism
     if !app_state
         .token_tracker
         .check_is_token_valid(&app_state.config, token)
@@ -409,6 +422,7 @@ async fn handle_ws(
         ));
     }
 
+    // get the primary key this user is claiming
     let pk = match base64::prelude::BASE64_URL_SAFE_NO_PAD.decode(pub_key) {
         Ok(pk) if pk.len() == 32 => {
             let mut sized_pk = [0; 32];
@@ -420,6 +434,7 @@ async fn handle_ws(
 
     let mut calc_ip = to_canonical_ip(addr.ip());
 
+    // if we're using a trusted ip, parse that out of the header
     if let Some(trusted_ip_header) = &app_state.config.trusted_ip_header {
         if let Some(header) =
             headers.get(trusted_ip_header).and_then(|h| h.to_str().ok())
@@ -430,6 +445,7 @@ async fn handle_ws(
         }
     }
 
+    // do the actual websocket upgrade
     ws.max_message_size(MAX_MSG_BYTES as usize).on_upgrade(
         move |socket| async move {
             handle_upgraded(
@@ -548,6 +564,7 @@ impl SbdServer {
         let cslot = CSlot::new(config.clone(), ip_rate.clone());
         let weak_cslot = cslot.weak();
 
+        // setup the axum router
         let app: axum::Router<()> = axum::Router::new()
             .route("/authenticate", axum::routing::put(handle_auth))
             .route("/{pub_key}", axum::routing::any(handle_ws))
@@ -563,6 +580,7 @@ impl SbdServer {
 
         let mut found_port_zero: Option<u16> = None;
 
+        // bind to configured bindings
         for bind in config.bind.iter() {
             let mut a: std::net::SocketAddr =
                 bind.parse().map_err(Error::other)?;
