@@ -291,7 +291,7 @@ impl CSlot {
     }
 }
 
-/// This top-task waits for incoming websockets, process them until
+/// This top-task waits for incoming websockets, processes them until
 /// completion, and then waits for a new incoming websocket.
 async fn top_task(
     config: Arc<Config>,
