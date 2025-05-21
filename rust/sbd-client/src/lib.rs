@@ -262,6 +262,7 @@ impl SbdClient {
                 .encode(crypto.pub_key())
         );
 
+        // establish a "raw" low-level websocket connection to the server
         let (mut send, mut recv) = raw_client::WsRawConnect {
             full_url: full_url.clone(),
             max_message_size: MAX_MSG_SIZE,
@@ -275,6 +276,8 @@ impl SbdClient {
         .connect()
         .await?;
 
+        // performing the initial handshake authenticates us as a client
+        // and returns some server configuration values
         let raw_client::Handshake {
             limit_byte_nanos,
             limit_idle_millis,
@@ -282,6 +285,7 @@ impl SbdClient {
         } = raw_client::Handshake::handshake(&mut send, &mut recv, crypto)
             .await?;
 
+        // SendBuf helps us track rate-limiting so we don't ban ourselves
         let send_buf = send_buf::SendBuf::new(
             full_url.clone(),
             send,
@@ -292,6 +296,7 @@ impl SbdClient {
         );
         let send_buf = Arc::new(tokio::sync::Mutex::new(send_buf));
 
+        // spawn the read task that reads from the websocket connection
         let send_buf2 = send_buf.clone();
         let (recv_send, recv_recv) = tokio::sync::mpsc::channel(4);
         let read_task = tokio::task::spawn(async move {
@@ -303,19 +308,25 @@ impl SbdClient {
                     Err(_) => break,
                 } {
                     MsgType::Msg { .. } => {
+                        // we got a message from someone, forward to user
                         if recv_send.send(data).await.is_err() {
                             break;
                         }
                     }
                     MsgType::LimitByteNanos(rate) => {
+                        // the server is reconfiguring the ratelimiting
                         send_buf2
                             .lock()
                             .await
                             .new_rate_limit((rate as f64 * 1.1) as u64);
                     }
+                    // idle messages should not be sent at this stage
                     MsgType::LimitIdleMillis(_) => break,
+                    // authorization requests should not be sent at this stage
                     MsgType::AuthReq(_) => break,
+                    // we can safely ignore late readys
                     MsgType::Ready => (),
+                    // ignore all protocol messages we don't understand
                     MsgType::Unknown => (),
                 }
             }
@@ -323,15 +334,21 @@ impl SbdClient {
             send_buf2.lock().await.close().await;
         });
 
+        // spawn the write task that sends data respecting rate limits
         let send_buf2 = send_buf.clone();
         let write_task = tokio::task::spawn(async move {
             loop {
+                // wait, if required by ratelimiting
                 if let Some(dur) = send_buf2.lock().await.next_step_dur() {
                     tokio::time::sleep(dur).await;
                 }
+
                 match send_buf2.lock().await.write_next_queued().await {
                     Err(_) => break,
+                    // send_buf was able to send something, loop again
                     Ok(true) => (),
+                    // send_buf failed to do anything, we need a short
+                    // delay before we try looping again to avoid a busy wait
                     Ok(false) => {
                         tokio::time::sleep(std::time::Duration::from_millis(
                             10,
