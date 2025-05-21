@@ -49,11 +49,13 @@ impl WsRawConnect {
             alter_token_cb,
         } = self;
 
+        // convert the url into a request
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         let mut request =
             IntoClientRequest::into_client_request(full_url.clone())
                 .map_err(Error::other)?;
 
+        // set any headers we are configured with
         for (k, v) in headers {
             use tokio_tungstenite::tungstenite::http::header::*;
             let k =
@@ -63,7 +65,9 @@ impl WsRawConnect {
             request.headers_mut().insert(k, v);
         }
 
+        // if we have auth_material, we need to authenticate
         if let Some(auth_material) = auth_material {
+            // figure out the authenticate endpoint url
             let mut auth_url =
                 url::Url::parse(&full_url).map_err(std::io::Error::other)?;
             auth_url.set_path("/authenticate");
@@ -77,6 +81,7 @@ impl WsRawConnect {
                 _ => (),
             }
 
+            // request a token from the /authenticate endpoint
             let token = tokio::task::spawn_blocking(move || {
                 ureq::put(auth_url.as_str())
                     .send(&auth_material[..])
@@ -85,6 +90,7 @@ impl WsRawConnect {
             })
             .await??;
 
+            // parse out the token
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct Token {
@@ -96,11 +102,13 @@ impl WsRawConnect {
             let token = token.auth_token;
 
             let token = if let Some(cb) = alter_token_cb {
+                // hook to allow token alterations
                 cb(token)
             } else {
                 token
             };
 
+            // finally add our token to the request headers
             use tokio_tungstenite::tungstenite::http::header::*;
             let v =
                 HeaderValue::from_bytes(format!("Bearer {token}").as_bytes())
@@ -131,9 +139,11 @@ impl WsRawConnect {
             }
         });
 
+        // open the tcp connection
         let tcp =
             tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
 
+        // optionally layer on TLS
         let maybe_tls = if scheme_ws {
             tokio_tungstenite::MaybeTlsStream::Plain(tcp)
         } else {
@@ -148,12 +158,14 @@ impl WsRawConnect {
             tokio_tungstenite::MaybeTlsStream::Rustls(tls)
         };
 
+        // set some default websocket config
         let config =
             tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
                 max_message_size: Some(max_message_size),
                 ..Default::default()
             };
 
+        // establish the connection
         let (ws, _res) = tokio_tungstenite::client_async_with_config(
             request,
             maybe_tls,
@@ -162,6 +174,7 @@ impl WsRawConnect {
         .await
         .map_err(Error::other)?;
 
+        // split for parallel send and recv
         let (send, recv) = futures::stream::StreamExt::split(ws);
 
         Ok((WsRawSend { send }, WsRawRecv { recv }))
@@ -216,10 +229,14 @@ impl WsRawRecv {
                 Some(r) => {
                     let msg = r.map_err(Error::other)?;
                     match msg {
+                        // convert text into binary
                         Text(s) => return Ok(s.into_bytes()),
+                        // use binary directly
                         Binary(v) => return Ok(v),
+                        // ignoring server ping/pong for now
                         Ping(_) | Pong(_) => (),
                         Close(_) => return Err(Error::other("closed")),
+                        // we are not configured to receive raw frames
                         Frame(_) => unreachable!(),
                     }
                 }
@@ -254,10 +271,14 @@ impl Handshake {
         loop {
             match Msg(recv.recv().await?).parse()? {
                 MsgType::Msg { .. } => {
-                    return Err(Error::other("invalid handshake"))
+                    // we are not authenticated yet, we should not get msgs
+                    return Err(Error::other("invalid handshake"));
                 }
+                // receive server rate limit
                 MsgType::LimitByteNanos(l) => limit_byte_nanos = l,
+                // receive server idle timeout
                 MsgType::LimitIdleMillis(l) => limit_idle_millis = l,
+                // process the authorization request
                 MsgType::AuthReq(nonce) => {
                     let sig = crypto.sign(nonce)?;
                     let mut auth_res = Vec::with_capacity(HDR_SIZE + SIG_SIZE);
@@ -267,6 +288,7 @@ impl Handshake {
                     send.send(auth_res).await?;
                     bytes_sent += HDR_SIZE + SIG_SIZE;
                 }
+                // hey! handshake is successful
                 MsgType::Ready => break,
                 MsgType::Unknown => (),
             }
