@@ -98,6 +98,7 @@ impl SodokenCrypto {
         }
     }
 
+    /// Derive session keys for a peer connection.
     fn session(
         &self,
         peer_sign_pk: &[u8; 32],
@@ -109,6 +110,7 @@ impl SodokenCrypto {
         let mut rx = sodoken::SizedLockedArray::new()?;
         let mut tx = sodoken::SizedLockedArray::new()?;
 
+        // determine the "server" by ordering
         if peer_enc_pk > self.enc_pk {
             sodoken::kx::client_session_keys(
                 &mut rx.lock(),
