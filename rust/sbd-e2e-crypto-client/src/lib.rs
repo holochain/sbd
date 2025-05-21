@@ -173,7 +173,7 @@ impl SbdClientCrypto {
         {
             let client = self.client.lock().await;
 
-            // send the encrypted messages to send
+            // send the pending encrypted messages
             for enc in enc {
                 client.send(pk, &enc).await?;
             }
