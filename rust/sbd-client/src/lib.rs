@@ -338,7 +338,7 @@ impl SbdClient {
         let send_buf2 = send_buf.clone();
         let write_task = tokio::task::spawn(async move {
             loop {
-                // if we know we have to wait, do that wait
+                // wait, if required by ratelimiting
                 if let Some(dur) = send_buf2.lock().await.next_step_dur() {
                     tokio::time::sleep(dur).await;
                 }
