@@ -95,9 +95,12 @@ impl SbdClientCrypto {
         url: &str,
         config: Arc<Config>,
     ) -> Result<(Self, MsgRecv)> {
+        // establish crypto
         let crypto = sodoken_crypto::SodokenCrypto::new()?;
         use sbd_client::Crypto;
         let pub_key = PubKey(Arc::new(*crypto.pub_key()));
+
+        // open a new connection
         let (client, recv) = sbd_client::SbdClient::connect_config(
             url,
             &crypto,
@@ -164,10 +167,13 @@ impl SbdClientCrypto {
             return Err(Error::other("message too long"));
         }
 
+        // get or create an encryptor, returns a list of messages to send
         let enc = self.inner.lock().unwrap().enc(pk, Some(msg))?;
 
         {
             let client = self.client.lock().await;
+
+            // send the pending encrypted messages
             for enc in enc {
                 client.send(pk, &enc).await?;
             }
@@ -216,6 +222,7 @@ struct Inner {
 }
 
 impl Inner {
+    /// Construct a new inner cryto client state.
     fn new(config: Arc<Config>, crypto: SodokenCrypto) -> Self {
         Self {
             config,
@@ -224,10 +231,12 @@ impl Inner {
         }
     }
 
+    /// Drop inner crypto client state for a particular peer.
     fn close(&mut self, pk: &PubKey) {
         self.c_map.remove(pk);
     }
 
+    /// Prune any internal crypto client state info that has idle expired.
     fn prune(
         c_map: &mut HashMap<PubKey, InnerRec>,
         max_idle: std::time::Duration,
@@ -236,6 +245,7 @@ impl Inner {
         c_map.retain(|_pk, r| now - r.last_active < max_idle);
     }
 
+    /// Assert inner crypto client state exists for a particular peer.
     fn loc_assert<'a>(
         config: &'a Config,
         c_map: &'a mut HashMap<PubKey, InnerRec>,
@@ -260,6 +270,10 @@ impl Inner {
         }
     }
 
+    /// Get or create an encryptor for a particular peer,
+    /// optionally encrypting a message. Note, even if you
+    /// don't pass a message, calling this may generate
+    /// crypto handshake data to be sent.
     fn enc(
         &mut self,
         pk: &PubKey,
@@ -282,6 +296,8 @@ impl Inner {
             let (enc, hdr) = crypto.new_enc(pk)?;
             rec.enc = Some(enc);
             let msg = protocol::Protocol::new_stream(&**pk, &hdr);
+
+            // push handshake message
             out.push(msg.base_msg().clone());
         }
 
@@ -295,12 +311,16 @@ impl Inner {
         Ok(out)
     }
 
+    /// Get or create a decryptor for a given peer, and
+    /// process an incoming message.
     fn dec(&mut self, msg: sbd_client::Msg) -> DecRes {
         let Self {
             config,
             crypto,
             c_map,
         } = self;
+
+        // ensure inner crypto state exists for the peer
         let rec = match Self::loc_assert(
             config,
             c_map,
@@ -313,7 +333,11 @@ impl Inner {
                 return DecRes::Ignore;
             }
         };
+
+        // update idle tracking
         rec.last_active = std::time::Instant::now();
+
+        // decode the message
         let dec = match protocol::Protocol::from_full(
             bytes::Bytes::copy_from_slice(&msg.0),
         ) {
@@ -325,8 +349,11 @@ impl Inner {
                 return DecRes::ReqNewStream;
             }
         };
+
+        // process the decoded message
         match dec {
             protocol::Protocol::NewStream { header, .. } => {
+                // peer instructs us to start a new decryption stream
                 let dec =
                     match crypto.new_dec(msg.pub_key_ref(), header.as_ref()) {
                         Ok(dec) => dec,
@@ -336,6 +363,7 @@ impl Inner {
                 DecRes::Ignore
             }
             protocol::Protocol::Message { message, .. } => {
+                // we got a message, forward to receiver
                 match rec.dec.as_mut() {
                     Some(dec) => match dec.decrypt(message.as_ref()) {
                         Ok(message) => DecRes::Ok(message),
@@ -349,6 +377,7 @@ impl Inner {
                 }
             }
             protocol::Protocol::RequestNewStream { .. } => {
+                // peer wants us to establish a new encryption stream
                 rec.enc = None;
                 DecRes::Ignore
             }
