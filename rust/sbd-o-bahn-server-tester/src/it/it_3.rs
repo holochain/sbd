@@ -50,18 +50,18 @@ impl It for It3 {
             send.send(res).await?;
 
             loop {
-                match recv.recv().await {
+                return match recv.recv().await {
                     Ok(msg) => {
                         let cmd = String::from_utf8_lossy(&msg[28..32]);
                         if cmd == "lbrt" {
                             continue;
                         }
-                        return Err(Error::other(format!(
+                        Err(Error::other(format!(
                             "unexpected handshake success: {cmd}"
-                        )));
+                        )))
                     }
-                    Err(_) => return Ok(()),
-                }
+                    Err(_) => Ok(()),
+                };
             }
         }
     }

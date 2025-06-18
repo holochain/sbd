@@ -16,7 +16,7 @@ enum TaskMsg {
         uniq: u64,
         index: usize,
         ws: Arc<dyn SbdWebsocket>,
-        ip: Arc<std::net::Ipv6Addr>,
+        ip: Arc<Ipv6Addr>,
         pk: PubKey,
         maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
     },
@@ -38,7 +38,7 @@ struct CSlotInner {
     slots: Vec<SlotEntry>,
     slab: slab::Slab<SlabEntry>,
     pk_to_index: HashMap<PubKey, usize>,
-    ip_to_index: HashMap<Arc<std::net::Ipv6Addr>, Vec<usize>>,
+    ip_to_index: HashMap<Arc<Ipv6Addr>, Vec<usize>>,
     task_list: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -127,7 +127,7 @@ impl CSlot {
     #[allow(clippy::type_complexity)]
     fn insert_and_get_rate_send_list(
         &self,
-        ip: Arc<std::net::Ipv6Addr>,
+        ip: Arc<Ipv6Addr>,
         pk: PubKey,
         ws: Arc<dyn SbdWebsocket>,
         maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
@@ -200,7 +200,7 @@ impl CSlot {
     pub async fn insert(
         &self,
         config: &Config,
-        ip: Arc<std::net::Ipv6Addr>,
+        ip: Arc<Ipv6Addr>,
         pk: PubKey,
         ws: Arc<impl SbdWebsocket>,
         maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
@@ -295,7 +295,7 @@ impl CSlot {
 /// completion, and then waits for a new incoming websocket.
 async fn top_task(
     config: Arc<Config>,
-    ip_rate: Arc<ip_rate::IpRate>,
+    ip_rate: Arc<IpRate>,
     weak: WeakCSlot,
     mut recv: tokio::sync::mpsc::UnboundedReceiver<TaskMsg>,
 ) {
@@ -352,10 +352,10 @@ async fn top_task(
 #[allow(clippy::too_many_arguments)]
 async fn ws_task(
     config: &Arc<Config>,
-    ip_rate: &ip_rate::IpRate,
+    ip_rate: &IpRate,
     weak_cslot: &WeakCSlot,
     ws: &Arc<dyn SbdWebsocket>,
-    ip: Arc<std::net::Ipv6Addr>,
+    ip: Arc<Ipv6Addr>,
     pk: PubKey,
     uniq: u64,
     index: usize,

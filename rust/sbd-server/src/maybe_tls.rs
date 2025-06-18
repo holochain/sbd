@@ -59,7 +59,7 @@ impl TlsConfig {
             std::io::Error::other("error reading priv key")
         })?;
 
-        Ok(std::sync::Arc::new(
+        Ok(Arc::new(
             rustls::server::ServerConfig::builder()
                 .with_no_client_auth()
                 .with_single_cert(certs, pk)
