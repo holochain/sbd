@@ -66,12 +66,12 @@ mod default_crypto {
         }
     }
 
-    impl super::Crypto for DefaultCrypto {
+    impl Crypto for DefaultCrypto {
         fn pub_key(&self) -> &[u8; PK_SIZE] {
             &self.0
         }
 
-        fn sign(&self, nonce: &[u8]) -> std::io::Result<[u8; SIG_SIZE]> {
+        fn sign(&self, nonce: &[u8]) -> Result<[u8; SIG_SIZE]> {
             use ed25519_dalek::Signer;
             Ok(self.1.sign(nonce).to_bytes())
         }

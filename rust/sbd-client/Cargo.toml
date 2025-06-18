@@ -2,13 +2,14 @@
 name = "sbd-client"
 version.workspace = true
 description = "simple websocket-based message relay client"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/holochain/sbd"
 documentation = "https://docs.rs/sbd-client"
-authors = ["Holochain Core Dev Team <devcore@holochain.org>"]
-keywords = ["holochain", "holo", "p2p", "networking"]
-categories = ["network-programming"]
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 edition.workspace = true
+homepage.workspace = true
 
 [dependencies]
 base64 = { workspace = true }

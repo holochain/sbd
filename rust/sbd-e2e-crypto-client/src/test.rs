@@ -6,7 +6,7 @@ pub struct Cfg(pub Config);
 impl Cfg {
     pub fn d() -> Self {
         Self(Config {
-            client_config: sbd_client::SbdClientConfig {
+            client_config: SbdClientConfig {
                 allow_plain_text: true,
                 ..Default::default()
             },

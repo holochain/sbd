@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! Sbd end to end encryption client.
+//! Sbd end-to-end encryption client.
 //!
 //! See the [protocol] module documentation for spec details.
 
@@ -17,7 +17,7 @@ pub use sodoken_crypto::*;
 /// Configuration for setting up an SbdClientCrypto connection.
 pub struct Config {
     /// Config required for the sbd client itself.
-    pub client_config: sbd_client::SbdClientConfig,
+    pub client_config: SbdClientConfig,
 
     /// If `true` we will accept incoming "connections", otherwise
     /// messages from nodes we didn't explicitly "connect" to will
@@ -96,7 +96,7 @@ impl SbdClientCrypto {
         config: Arc<Config>,
     ) -> Result<(Self, MsgRecv)> {
         // establish crypto
-        let crypto = sodoken_crypto::SodokenCrypto::new()?;
+        let crypto = SodokenCrypto::new()?;
         use sbd_client::Crypto;
         let pub_key = PubKey(Arc::new(*crypto.pub_key()));
 

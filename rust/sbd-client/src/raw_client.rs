@@ -69,7 +69,7 @@ impl WsRawConnect {
         if let Some(auth_material) = auth_material {
             // figure out the authenticate endpoint url
             let mut auth_url =
-                url::Url::parse(&full_url).map_err(std::io::Error::other)?;
+                url::Url::parse(&full_url).map_err(Error::other)?;
             auth_url.set_path("/authenticate");
             match auth_url.scheme() {
                 "ws" => {
@@ -85,8 +85,10 @@ impl WsRawConnect {
             let token = tokio::task::spawn_blocking(move || {
                 ureq::put(auth_url.as_str())
                     .send(&auth_material[..])
-                    .map_err(std::io::Error::other)?
-                    .into_string()
+                    .map_err(Error::other)?
+                    .into_body()
+                    .read_to_string()
+                    .map_err(Error::other)
             })
             .await??;
 
@@ -98,7 +100,7 @@ impl WsRawConnect {
             }
 
             let token: Token =
-                serde_json::from_str(&token).map_err(std::io::Error::other)?;
+                serde_json::from_str(&token).map_err(Error::other)?;
             let token = token.auth_token;
 
             let token = if let Some(cb) = alter_token_cb {
@@ -160,10 +162,9 @@ impl WsRawConnect {
 
         // set some default websocket config
         let config =
-            tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-                max_message_size: Some(max_message_size),
-                ..Default::default()
-            };
+            tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default(
+            )
+            .max_message_size(Some(max_message_size));
 
         // establish the connection
         let (ws, _res) = tokio_tungstenite::client_async_with_config(
@@ -197,9 +198,7 @@ impl WsRawSend {
     pub async fn send(&mut self, msg: Vec<u8>) -> Result<()> {
         use futures::sink::SinkExt;
         self.send
-            .send(tokio_tungstenite::tungstenite::protocol::Message::binary(
-                msg,
-            ))
+            .send(Message::binary(msg))
             .await
             .map_err(Error::other)?;
         self.send.flush().await.map_err(Error::other)?;
@@ -230,9 +229,9 @@ impl WsRawRecv {
                     let msg = r.map_err(Error::other)?;
                     match msg {
                         // convert text into binary
-                        Text(s) => return Ok(s.into_bytes()),
+                        Text(s) => return Ok(s.as_bytes().to_vec()),
                         // use binary directly
-                        Binary(v) => return Ok(v),
+                        Binary(v) => return Ok(v.to_vec()),
                         // ignoring server ping/pong for now
                         Ping(_) | Pong(_) => (),
                         Close(_) => return Err(Error::other("closed")),

@@ -102,7 +102,7 @@ pub struct SbdServer {
 
     // this should be the only non-weak cslot so the others are dropped
     // if this top-level server instance is ever dropped.
-    _cslot: cslot::CSlot,
+    _cslot: CSlot,
 }
 
 impl Drop for SbdServer {
@@ -237,9 +237,9 @@ pub enum AuthenticateTokenError {
     /// The token is invalid.
     Unauthorized,
     /// We had an error talking to the hook server.
-    HookServerError(std::io::Error),
+    HookServerError(Error),
     /// We had an internal error.
-    OtherError(std::io::Error),
+    OtherError(Error),
 }
 
 /// Handle receiving a PUT "/authenticate" rest api request.
@@ -257,20 +257,22 @@ pub async fn process_authenticate_token(
         let url = url.clone();
         let token = tokio::task::spawn_blocking(move || {
             ureq::put(&url)
-                .set("Content-Type", "application/octet-stream")
+                .header("Content-Type", "application/octet-stream")
                 .send(&auth_material[..])
                 .map_err(|err| match err {
-                    ureq::Error::Status(401, _) => Unauthorized,
-                    oth => HookServerError(std::io::Error::other(oth)),
+                    ureq::Error::StatusCode(401) => Unauthorized,
+                    oth => HookServerError(Error::other(oth)),
                 })?
-                .into_string()
+                .into_body()
+                .read_to_string()
+                .map_err(Error::other)
                 // this is a HookServerError, not an OtherError, because
                 // it is the hook server that either failed to send a full
                 // response, or sent back non-utf8 bytes, etc...
                 .map_err(HookServerError)
         })
         .await
-        .map_err(|_| OtherError(std::io::Error::other("tokio task died")))??;
+        .map_err(|_| OtherError(Error::other("tokio task died")))??;
 
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -279,7 +281,7 @@ pub async fn process_authenticate_token(
         }
 
         let token: Token = serde_json::from_str(&token)
-            .map_err(|err| OtherError(std::io::Error::other(err)))?;
+            .map_err(|err| OtherError(Error::other(err)))?;
 
         token.auth_token
     } else {
@@ -550,7 +552,7 @@ impl SbdServer {
         let tls_config = if let (Some(cert), Some(pk)) =
             (&config.cert_pem_file, &config.priv_key_pem_file)
         {
-            Some(Arc::new(maybe_tls::TlsConfig::new(cert, pk).await?))
+            Some(Arc::new(TlsConfig::new(cert, pk).await?))
         } else {
             None
         };

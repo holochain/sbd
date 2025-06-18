@@ -29,7 +29,7 @@ pub struct Report {
 
 /// Run the test suite.
 pub async fn run<S: AsRef<std::ffi::OsStr>>(cmd: Vec<S>) -> Report {
-    let mut server = crate::Server::spawn(cmd).await.unwrap();
+    let mut server = Server::spawn(cmd).await.unwrap();
 
     it::exec_all(&mut server).await
 }
