@@ -1864,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-client"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1888,7 +1888,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-e2e-crypto-client"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bytes",
  "sbd-client",
@@ -1900,7 +1900,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-o-bahn-client-tester"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "hex",
  "sbd-server",
@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-o-bahn-server-tester"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "sbd-client",
  "tokio",
@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "sbd-server"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anstyle",
  "axum",
