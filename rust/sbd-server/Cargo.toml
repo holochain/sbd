@@ -34,6 +34,7 @@ slab = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = [ "env-filter" ] }
 ureq = { workspace = true }
 
 [dev-dependencies]

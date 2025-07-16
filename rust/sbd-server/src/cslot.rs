@@ -471,4 +471,6 @@ async fn ws_task(
             }
         }
     }
+
+    tracing::debug!("Closed connection for {ip}");
 }
