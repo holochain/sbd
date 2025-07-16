@@ -56,6 +56,7 @@ tokio = { version = "1.37.0", default-features = false }
 tokio-rustls = "0.26"
 tokio-tungstenite = { version = "0.27", default-features = false }
 tracing = "0.1.40"
+tracing-subscriber = "0.3"
 url = "2.5.4"
 ureq = "3.0"
 webpki-roots = "1.0"

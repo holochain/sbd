@@ -88,6 +88,7 @@ impl IpRate {
         };
 
         if !is_ok {
+            tracing::info!("IP rate limit exceeded for {ip}, blocking");
             self.ip_deny.block(ip).await;
         }
 
