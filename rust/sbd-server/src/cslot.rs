@@ -205,6 +205,8 @@ impl CSlot {
         ws: Arc<impl SbdWebsocket>,
         maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
     ) {
+        tracing::info!("Inserting a new websocket connection for {ip}");
+
         let rate_send_list =
             self.insert_and_get_rate_send_list(ip, pk, ws, maybe_auth);
 
@@ -287,6 +289,36 @@ impl CSlot {
                 Err(err)
             }
             Ok(_) => Ok(()),
+        }
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub(crate) async fn drop_all_connections(&self) {
+        let keys = {
+            let guard = self.0.lock().expect("poisoned");
+            guard.pk_to_index.keys().cloned().collect::<Vec<_>>()
+        };
+
+        for pk in keys {
+            if let Ok((uniq, index, _ws)) = self.get_sender(&pk) {
+                let mut lock = self.0.lock().unwrap();
+
+                match lock.slab.get(index) {
+                    None => return,
+                    Some(s) => {
+                        if s.uniq != uniq {
+                            return;
+                        }
+                    }
+                }
+
+                lock.slab.remove(index);
+                lock.pk_to_index.retain(|_, i| *i != index);
+                lock.ip_to_index.retain(|_, v| {
+                    v.retain(|i| *i != index);
+                    !v.is_empty()
+                });
+            }
         }
     }
 }

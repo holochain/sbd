@@ -636,6 +636,14 @@ impl SbdServer {
     pub fn bind_addrs(&self) -> &[std::net::SocketAddr] {
         self.bind_addrs.as_slice()
     }
+
+    /// Drop all connections without sending a close message.
+    ///
+    /// Simulates a fault where connections to the signal server are lost.
+    #[cfg(feature = "test-utils")]
+    pub async fn drop_all_connections(&self) {
+        self._cslot.drop_all_connections().await;
+    }
 }
 
 #[cfg(test)]

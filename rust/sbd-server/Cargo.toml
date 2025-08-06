@@ -56,3 +56,5 @@ tungstenite = []
 fastwebsockets = []
 
 unstable = []
+
+test-utils = []
