@@ -40,6 +40,7 @@ struct CSlotInner {
     pk_to_index: HashMap<PubKey, usize>,
     ip_to_index: HashMap<Arc<Ipv6Addr>, Vec<usize>>,
     task_list: Vec<tokio::task::JoinHandle<()>>,
+    open_connections: opentelemetry::metrics::UpDownCounter<i64>,
 }
 
 impl Drop for CSlotInner {
@@ -69,8 +70,19 @@ pub struct CSlot(Arc<Mutex<CSlotInner>>);
 
 impl CSlot {
     /// Create a new connection slot container.
-    pub fn new(config: Arc<Config>, ip_rate: Arc<IpRate>) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        ip_rate: Arc<IpRate>,
+        meter: opentelemetry::metrics::Meter,
+    ) -> Self {
         let count = config.limit_clients as usize;
+
+        let ip_rate_counter = meter
+            .u64_counter("sbd.server.ip_rate_limited")
+            .with_description("Total number of IP rate limited events")
+            .with_unit("count")
+            .build();
+
         Self(Arc::new_cyclic(|this| {
             let mut slots = Vec::with_capacity(count);
             let mut task_list = Vec::with_capacity(count);
@@ -82,8 +94,15 @@ impl CSlot {
                     ip_rate.clone(),
                     WeakCSlot(this.clone()),
                     recv,
+                    ip_rate_counter.clone(),
                 )));
             }
+
+            let open_connections = meter
+                .i64_up_down_counter("sbd.server.open_connections")
+                .with_description("Number of open client connections")
+                .build();
+
             Mutex::new(CSlotInner {
                 max_count: count,
                 slots,
@@ -91,6 +110,7 @@ impl CSlot {
                 pk_to_index: HashMap::with_capacity(count),
                 ip_to_index: HashMap::with_capacity(count),
                 task_list,
+                open_connections,
             })
         }))
     }
@@ -120,6 +140,9 @@ impl CSlot {
             v.retain(|i| *i != index);
             !v.is_empty()
         });
+
+        // Decrement the open connections metric
+        lock.open_connections.add(-1, &[])
     }
 
     /// Inner helper for inserting a websocket into an available slot.
@@ -192,6 +215,9 @@ impl CSlot {
             pk,
             maybe_auth,
         });
+
+        // Increment the open connections metric
+        lock.open_connections.add(1, &[]);
 
         Ok(rate_send_list)
     }
@@ -298,6 +324,7 @@ async fn top_task(
     ip_rate: Arc<IpRate>,
     weak: WeakCSlot,
     mut recv: tokio::sync::mpsc::UnboundedReceiver<TaskMsg>,
+    ip_rate_counter: opentelemetry::metrics::Counter<u64>,
 ) {
     let mut item = recv.recv().await;
     loop {
@@ -328,6 +355,7 @@ async fn top_task(
                     uniq,
                     index,
                     maybe_auth,
+                    &ip_rate_counter,
                 ) => None,
             };
 
@@ -360,7 +388,10 @@ async fn ws_task(
     uniq: u64,
     index: usize,
     maybe_auth: Option<(Option<Arc<str>>, AuthTokenTracker)>,
+    ip_rate_counter: &opentelemetry::metrics::Counter<u64>,
 ) {
+    let pub_key =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(*pk.0);
     let auth_res = tokio::time::timeout(config.idle_dur(), async {
         use rand::Rng;
         let mut nonce = [0xdb; 32];
@@ -373,6 +404,17 @@ async fn ws_task(
             let auth_res = ws.recv().await?;
 
             if !ip_rate.is_ok(&ip, auth_res.as_ref().len()).await {
+                ip_rate_counter.add(
+                    1,
+                    &[
+                        opentelemetry::KeyValue::new(
+                            "pub_key",
+                            pub_key.clone(),
+                        ),
+                        opentelemetry::KeyValue::new("kind", "auth"),
+                    ],
+                );
+
                 return Err(Error::other("ip rate limited"));
             }
 
@@ -427,6 +469,14 @@ async fn ws_task(
         tokio::time::timeout(config.idle_dur(), ws.recv()).await
     {
         if !ip_rate.is_ok(&ip, payload.len()).await {
+            ip_rate_counter.add(
+                1,
+                &[
+                    opentelemetry::KeyValue::new("pub_key", pub_key),
+                    opentelemetry::KeyValue::new("kind", "msg"),
+                ],
+            );
+
             break;
         }
 

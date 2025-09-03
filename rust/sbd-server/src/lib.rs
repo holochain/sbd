@@ -1,9 +1,26 @@
 //! Sbd server library.
+//!
+//! ## Metrics
+//!
+//! The server exports the following OpenTelemetry metrics if an OTLP endpoint is configured.
+//!
+//! Prometheus example: `sbd-serverd --otlp-endpoint http://localhost:9090/api/v1/otlp/v1/metrics`
+//!
+//! | Full Metric Name | Type | Unit (optional) | Description | Attributes |
+//! | ---------------- | ---- | --------------- | ----------- | ---------- |
+//! | `sbd.server.open_connections` | `f64_up_down_counter` | `count` | The current number of open connections | |
+//! | `sbd.server.ip_rate_limited` | `u64_counter` | `count` | The number of connections that have been closed because of an IP rate limiting violation | - `pub_key`: The base64 encoded public key declared by the offending connection.<br />- `kind`: Has two possible values. It will be "auth" for violations during authentication and "msg" for violations while sending messages. |
+//! | `sbd.server.bytes_send` | `u64_counter` | `bytes` | The number of bytes sent per public key. Resets when a new connection is opened. | - `pub_key`: The base64 encoded public key declared by the offending connection. |
+//! | `sbd.server.bytes_recv` | `u64_counter` | `bytes` | The number of bytes received per public key. Resets when a new connection is opened. | - `pub_key`: The base64 encoded public key declared by the offending connection. |
+//! | `sbd.server.auth_failures` | `u64_counter` | `count` | The number of failed authentication attempts. | - `pub_key`: The base64 encoded public key declared by the offending connection. This is only present if an invalid token is used with a specific public key. |
+
 #![deny(missing_docs)]
 
 /// defined by the sbd spec
 const MAX_MSG_BYTES: i32 = 20_000;
 
+use base64::Engine;
+use opentelemetry::global;
 use std::collections::HashMap;
 use std::io::{Error, Result};
 use std::net::{IpAddr, Ipv6Addr};
@@ -23,6 +40,9 @@ mod cslot;
 pub use cslot::*;
 
 mod cmd;
+
+mod metrics;
+pub use metrics::*;
 
 /// Websocket backend abstraction.
 pub mod ws {
@@ -199,6 +219,7 @@ async fn handle_auth(
     match process_authenticate_token(
         &app_state.config,
         &app_state.token_tracker,
+        app_state.auth_failures,
         body,
     )
     .await
@@ -246,6 +267,7 @@ pub enum AuthenticateTokenError {
 pub async fn process_authenticate_token(
     config: &Config,
     token_tracker: &AuthTokenTracker,
+    auth_failures: opentelemetry::metrics::Counter<u64>,
     auth_material: bytes::Bytes,
 ) -> std::result::Result<Arc<str>, AuthenticateTokenError> {
     use AuthenticateTokenError::*;
@@ -259,9 +281,13 @@ pub async fn process_authenticate_token(
             ureq::put(&url)
                 .header("Content-Type", "application/octet-stream")
                 .send(&auth_material[..])
-                .map_err(|err| match err {
-                    ureq::Error::StatusCode(401) => Unauthorized,
-                    oth => HookServerError(Error::other(oth)),
+                .map_err(|err| {
+                    auth_failures.add(1, &[]);
+
+                    match err {
+                        ureq::Error::StatusCode(401) => Unauthorized,
+                        oth => HookServerError(Error::other(oth)),
+                    }
                 })?
                 .into_body()
                 .read_to_string()
@@ -318,6 +344,9 @@ struct WebsocketImpl {
             futures::stream::SplitStream<axum::extract::ws::WebSocket>,
         >,
     >,
+    attr: Vec<opentelemetry::KeyValue>,
+    bytes_send: opentelemetry::metrics::Counter<u64>,
+    bytes_recv: opentelemetry::metrics::Counter<u64>,
 }
 
 impl SbdWebsocket for WebsocketImpl {
@@ -333,10 +362,12 @@ impl SbdWebsocket for WebsocketImpl {
                         let msg = r.map_err(Error::other)?;
                         match msg {
                             axum::extract::ws::Message::Text(s) => {
-                                return Ok(Payload::Vec(s.as_bytes().to_vec()))
+                                this.bytes_recv.add(s.len() as u64, &this.attr);
+                                return Ok(Payload::Vec(s.as_bytes().to_vec()));
                             }
                             axum::extract::ws::Message::Binary(v) => {
-                                return Ok(Payload::Vec(v[..].to_vec()))
+                                this.bytes_recv.add(v.len() as u64, &this.attr);
+                                return Ok(Payload::Vec(v[..].to_vec()));
                             }
                             axum::extract::ws::Message::Ping(_)
                             | axum::extract::ws::Message::Pong(_) => (),
@@ -362,6 +393,7 @@ impl SbdWebsocket for WebsocketImpl {
                 Payload::Vec(v) => v,
                 Payload::BytesMut(b) => b.to_vec(),
             };
+            this.bytes_send.add(v.len() as u64, &this.attr);
             write
                 .send(axum::extract::ws::Message::Binary(
                     bytes::Bytes::copy_from_slice(&v),
@@ -383,12 +415,34 @@ impl SbdWebsocket for WebsocketImpl {
 }
 
 impl WebsocketImpl {
-    fn new(ws: axum::extract::ws::WebSocket) -> Self {
+    fn new(
+        ws: axum::extract::ws::WebSocket,
+        pk: PubKey,
+        meter: &opentelemetry::metrics::Meter,
+    ) -> Self {
         use futures::StreamExt;
+
+        let bytes_send = meter
+            .u64_counter("sbd.server.bytes_send")
+            .with_description("Number of bytes sent to client")
+            .with_unit("bytes")
+            .build();
+        let bytes_recv = meter
+            .u64_counter("sbd.server.bytes_recv")
+            .with_description("Number of bytes received from client")
+            .with_unit("bytes")
+            .build();
+
         let (tx, rx) = ws.split();
         Self {
             write: Arc::new(tokio::sync::Mutex::new(tx)),
             read: Arc::new(tokio::sync::Mutex::new(rx)),
+            attr: vec![opentelemetry::KeyValue::new(
+                "pub_key",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(*pk.0),
+            )],
+            bytes_send,
+            bytes_recv,
         }
     }
 }
@@ -418,6 +472,13 @@ async fn handle_ws(
         .token_tracker
         .check_is_token_valid(&app_state.config, token)
     {
+        // Might be useful to record the IP address here, but it's special category data. To keep
+        // the server privacy-friendly, avoid exporting the IP address to the metrics even though
+        // this user did not authenticate properly.
+        app_state
+            .auth_failures
+            .add(1, &[opentelemetry::KeyValue::new("pub_key", pub_key)]);
+
         return axum::response::IntoResponse::into_response((
             axum::http::StatusCode::UNAUTHORIZED,
             "Unauthorized",
@@ -454,7 +515,11 @@ async fn handle_ws(
                 app_state.config.clone(),
                 app_state.ip_rate.clone(),
                 app_state.cslot.clone(),
-                Arc::new(WebsocketImpl::new(socket)),
+                Arc::new(WebsocketImpl::new(
+                    socket,
+                    pk.clone(),
+                    &app_state.meter,
+                )),
                 pk,
                 calc_ip,
                 maybe_auth,
@@ -529,6 +594,8 @@ struct AppState {
     token_tracker: AuthTokenTracker,
     ip_rate: Arc<IpRate>,
     cslot: WeakCSlot,
+    auth_failures: opentelemetry::metrics::Counter<u64>,
+    meter: opentelemetry::metrics::Meter,
 }
 
 impl AppState {
@@ -536,12 +603,19 @@ impl AppState {
         config: Arc<Config>,
         ip_rate: Arc<IpRate>,
         cslot: WeakCSlot,
+        meter: opentelemetry::metrics::Meter,
     ) -> Self {
         Self {
             config,
             token_tracker: AuthTokenTracker::default(),
             ip_rate,
             cslot,
+            auth_failures: meter
+                .u64_counter("sbd.server.auth_failures")
+                .with_description("Number of failed authentication attempts")
+                .with_unit("count")
+                .build(),
+            meter,
         }
     }
 }
@@ -557,13 +631,19 @@ impl SbdServer {
             None
         };
 
+        let sbd_server_meter = global::meter("sbd-server");
+
         let mut task_list = Vec::new();
         let mut bind_addrs = Vec::new();
 
         let ip_rate = Arc::new(IpRate::new(config.clone()));
         task_list.push(spawn_prune_task(ip_rate.clone()));
 
-        let cslot = CSlot::new(config.clone(), ip_rate.clone());
+        let cslot = CSlot::new(
+            config.clone(),
+            ip_rate.clone(),
+            sbd_server_meter.clone(),
+        );
         let weak_cslot = cslot.weak();
 
         // setup the axum router
@@ -575,6 +655,7 @@ impl SbdServer {
                 config.clone(),
                 ip_rate.clone(),
                 weak_cslot.clone(),
+                sbd_server_meter,
             ));
 
         let app =

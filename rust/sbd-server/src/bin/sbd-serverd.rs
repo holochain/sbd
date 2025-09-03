@@ -17,6 +17,8 @@ async fn main() {
 
     let config = <Config as clap::Parser>::parse();
     println!("#sbd-serverd#note# {config:?}");
+    enable_otlp_metrics_if_configured(&config)
+        .expect("Failed to initialize OTLP metrics");
     let server = SbdServer::new(Arc::new(config)).await.unwrap();
     for addr in server.bind_addrs() {
         println!("#sbd-serverd#listening# {addr:?}");

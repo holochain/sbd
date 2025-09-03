@@ -25,6 +25,9 @@ bytes = { workspace = true }
 clap = { workspace = true, features = [ "color", "derive", "wrap_help" ] }
 ed25519-dalek = { workspace = true, default-features = false }
 futures = { workspace = true }
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp = { workspace = true, features = ["http-proto", "http-json"]}
 rand = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
