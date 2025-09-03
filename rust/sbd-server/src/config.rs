@@ -124,6 +124,10 @@ pub struct Config {
     /// <https://github.com/holochain/sbd/blob/main/spec-auth.md>
     #[arg(long)]
     pub authentication_hook_server: Option<String>,
+
+    /// If specified, this will enable exporting metrics to an OpenTelemetry endpoint.
+    #[arg(long)]
+    pub otlp_endpoint: Option<String>,
 }
 
 impl Default for Config {
@@ -154,6 +158,7 @@ impl Default for Config {
             limit_ip_byte_burst: DEF_LIMIT_IP_BYTE_BURST,
             limit_idle_millis: DEF_LIMIT_IDLE_MILLIS,
             authentication_hook_server: None,
+            otlp_endpoint: None,
         }
     }
 }
