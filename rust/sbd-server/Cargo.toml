@@ -20,6 +20,9 @@ axum = { workspace = true, default-features = false, features = [
   "ws",
 ] }
 axum-server = { workspace = true, features = [ "tls-rustls" ] }
+# Pin hyper to workaround issue where axum-server fails to compile.
+# TODO Remove this when upstream issue is resolved: https://github.com/programatik29/axum-server/issues/170
+hyper = "=1.7.0"
 base64 = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = [ "color", "derive", "wrap_help" ] }
